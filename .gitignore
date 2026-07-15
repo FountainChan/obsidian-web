@@ -21,3 +21,7 @@ docs-private/
 .vscode/
 *.swp
 *.log
+
+# brief-driven-slices: worktrees + verifier browser cache
+.worktrees/
+.playwright-cli/
