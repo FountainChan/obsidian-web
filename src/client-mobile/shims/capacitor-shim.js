@@ -523,6 +523,43 @@
     },
   };
 
+  // ── OPFS path normalization wrapper ─────────────────────────────────────
+  // Obsidian mobile uses the vaultId as its "base path" and prefixes every
+  // FS call with it (e.g. stat({path: vaultId}) on vault-open). OpfsStore's
+  // contract is vault-relative paths (see header of opfs-store.js) — it does
+  // NOT know about the vaultId prefix or the directory enum. HttpFilesystem
+  // already normalizes every call via fullPath() (see rename/copy above);
+  // this wrapper gives the OPFS backend the same normalized path so both
+  // backends see identical, vault-relative paths. See docs/plans/
+  // opfs-vault-path.md §3.
+  //
+  // Methods that receive opts.path (normalized to a single path). Note:
+  // trash is NOT here — it delegates to deleteFile (already normalized),
+  // so listing it too would double-normalize.
+  const OPFS_PATH_METHODS = ['readFile', 'writeFile', 'appendFile', 'deleteFile', 'mkdir', 'rmdir', 'readdir', 'stat', 'getUri'];
+
+  function wrapOpfsWithFullPath(store) {
+    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, setTimes, trash, ...)
+    for (const m of OPFS_PATH_METHODS) {
+      if (typeof store[m] !== 'function') continue;
+      wrapped[m] = (opts) => store[m](Object.assign({}, opts, { path: fullPath(opts) }));
+    }
+    // rename/copy — normalize both sides (mirrors HttpFilesystem:348-350, 367-369)
+    if (typeof store.rename === 'function') {
+      wrapped.rename = (opts) => store.rename(Object.assign({}, opts, {
+        from: fullPath({ path: opts.from, directory: opts.directory }),
+        to:   fullPath({ path: opts.to,   directory: opts.toDirectory || opts.directory }),
+      }));
+    }
+    if (typeof store.copy === 'function') {
+      wrapped.copy = (opts) => store.copy(Object.assign({}, opts, {
+        from: fullPath({ path: opts.from, directory: opts.directory }),
+        to:   fullPath({ path: opts.to,   directory: opts.toDirectory || opts.directory }),
+      }));
+    }
+    return wrapped;
+  }
+
   // ── Filesystem dispatcher (local ↔ server) ──────────────────────────────
   // window.__owVaultType is set by boot.js (mobile) at call-time — evaluated
   // per-call, not once at load-time. boot.js runs AFTER this script (see
@@ -532,7 +569,7 @@
   function fsBackend() {
     if (window.__owVaultType === 'local') {
       if (!window.__owLocalFs) {
-        window.__owLocalFs = window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId());
+        window.__owLocalFs = wrapOpfsWithFullPath(window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId()));
       }
       return window.__owLocalFs;
     }
