@@ -173,9 +173,13 @@
     };
   }
 
-  // ── Filesystem plugin ──────────────────────────────────────────────────
+  // ── Filesystem plugin (server vaults — HTTP /api/fs) ───────────────────
+  // Renamed from `Filesystem` to `HttpFilesystem`: for local vaults the
+  // `Filesystem` name below now refers to a Proxy dispatcher that routes
+  // to either this object (server) or OpfsStore (local). See
+  // docs/plans/opfs-wire.md §4 Commit 2.
 
-  const Filesystem = {
+  const HttpFilesystem = {
 
     async readFile(opts) {
       const p = fullPath(opts);
@@ -378,8 +382,11 @@
     },
 
     async trash(opts) {
-      // Map to deleteFile — we don't have a real trash on the server
-      return Filesystem.deleteFile(opts);
+      // Map to deleteFile — we don't have a real trash on the server.
+      // Must call HttpFilesystem.deleteFile (not the Filesystem Proxy) —
+      // otherwise a server-vault trash could get re-dispatched through the
+      // Proxy and split across backends. See §4 Commit 2.2.
+      return HttpFilesystem.deleteFile(opts);
     },
 
     async setTimes() { return {}; },       // no-op — server doesn't expose utimes
@@ -445,7 +452,9 @@
       //
       // Fix: return a FLAT list where every entry's `name` is its full
       // relative path (e.g. "10. פרויקטים/myfile.md").
-      await Filesystem.startWatch(opts);
+      // Must call HttpFilesystem.startWatch (not the Filesystem Proxy) — see
+      // §4 Commit 2.2 (internal references must stay pinned to this backend).
+      await HttpFilesystem.startWatch(opts);
 
       // Prefer the bootstrap cache populated by boot.js — it's the same
       // /api/bootstrap?full=1 response we'd fetch here anyway, so awaiting
@@ -494,7 +503,8 @@
     addListener(eventName, callback) {
       if (eventName === 'change') {
         if (!window.__owCapacitorWatcher) {
-          Filesystem.startWatch({}).catch(() => {});
+          // HttpFilesystem, not the Filesystem Proxy — see §4 Commit 2.2.
+          HttpFilesystem.startWatch({}).catch(() => {});
         }
         // Defer until watcher is ready
         setTimeout(() => {
@@ -512,6 +522,34 @@
       });
     },
   };
+
+  // ── Filesystem dispatcher (local ↔ server) ──────────────────────────────
+  // window.__owVaultType is set by boot.js (mobile) at call-time — evaluated
+  // per-call, not once at load-time. boot.js runs AFTER this script (see
+  // index.html loading order), so by the time Obsidian actually calls
+  // Filesystem.readFile etc., boot.js has already set __owVaultType. See
+  // docs/plans/opfs-wire.md §3 (Architecture diagram, "תובנת-מפתח").
+  function fsBackend() {
+    if (window.__owVaultType === 'local') {
+      if (!window.__owLocalFs) {
+        window.__owLocalFs = window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId());
+      }
+      return window.__owLocalFs;
+    }
+    return HttpFilesystem;
+  }
+  const Filesystem = new Proxy({}, {
+    get: function (_t, prop) {
+      const b = fsBackend();
+      const v = b[prop];
+      // bind is mandatory, not optional (avigail fix): OpfsStore.trash does
+      // `return this.deleteFile(opts)` (opfs-store.js:331) — it relies on
+      // `this`. Without bind, a destructured call (`const {trash}=Filesystem`)
+      // would break. HttpFilesystem doesn't need `this` (it calls
+      // HttpFilesystem.deleteFile explicitly) but bind is harmless there too.
+      return typeof v === 'function' ? v.bind(b) : v;
+    },
+  });
 
   // ── Stubs for non-critical plugins ────────────────────────────────────
 
