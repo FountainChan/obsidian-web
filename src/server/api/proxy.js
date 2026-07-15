@@ -48,7 +48,8 @@ function isAllowed(urlStr) {
   }
 }
 
-function fetchUrl(urlStr, method, reqHeaders, body) {
+function fetchUrl(urlStr, method, reqHeaders, body, redirectsLeft) {
+  if (redirectsLeft === undefined) redirectsLeft = 5;
   return new Promise((resolve, reject) => {
     let parsed;
     try { parsed = new URL(urlStr); } catch (e) { return reject(e); }
@@ -63,6 +64,26 @@ function fetchUrl(urlStr, method, reqHeaders, body) {
     };
 
     const req = lib.request(options, (res) => {
+      const sc = res.statusCode;
+      // Follow redirects — GitHub release-asset downloads 302 to a CDN
+      // (objects/release-assets.githubusercontent.com). The initial URL was
+      // allow-listed; redirects from it are trusted. Drop auth on cross-host.
+      if (redirectsLeft > 0 && sc >= 300 && sc < 400 && res.headers.location) {
+        res.resume(); // drain the redirect body
+        let nextUrl;
+        try { nextUrl = new URL(res.headers.location, urlStr).toString(); }
+        catch (e) { return reject(e); }
+        let crossHost = true;
+        try { crossHost = new URL(nextUrl).hostname !== parsed.hostname; } catch (_) {}
+        const nextHeaders = { ...reqHeaders };
+        if (crossHost) {
+          delete nextHeaders.authorization; delete nextHeaders.Authorization;
+          delete nextHeaders.cookie; delete nextHeaders.Cookie;
+        }
+        const nextMethod = sc === 303 ? 'GET' : method;
+        const nextBody = sc === 303 ? undefined : body;
+        return resolve(fetchUrl(nextUrl, nextMethod, nextHeaders, nextBody, redirectsLeft - 1));
+      }
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {

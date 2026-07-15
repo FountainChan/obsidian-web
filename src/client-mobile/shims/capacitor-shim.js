@@ -642,6 +642,33 @@
     isInstalledFromStore: () => Promise.resolve({ isFromStore: false }),
     async requestUrl(opts) {
       const { url, method, contentType, headers, body, binary } = opts;
+
+      // ── Selective server-proxy for Obsidian-infra hosts ────────────────────
+      // GitHub / obsidian.md release + community-plugin downloads either lack
+      // CORS or 302-redirect to a non-CORS CDN, so a direct browser fetch fails.
+      // Route ONLY those hosts through /api/proxy-request (server follows
+      // redirects, no CORS restriction). Everything else — CouchDB/LiveSync,
+      // the user's own hosts — stays a DIRECT fetch, so the server is never in
+      // the sync data path (preserves the direct-fetch sync architecture).
+      let __owHost = '';
+      try { __owHost = new URL(url, location.href).hostname; } catch (_) {}
+      if (/(^|\.)(github\.com|githubusercontent\.com|obsidian\.md)$/.test(__owHost)) {
+        const pr = await fetch('/api/proxy-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // body/binary pass straight through: the proxy decodes
+          // binary?base64:utf8 (matches Obsidian's requestUrl body contract).
+          body: JSON.stringify({
+            url, method: method || 'GET', headers: headers || {},
+            contentType, body: body != null ? body : undefined, binary: !!binary,
+          }),
+        });
+        const j = await pr.json().catch(() => ({}));
+        if (!pr.ok) throw capError(j.code || 'EIO', j.error || 'proxy-request failed: ' + url);
+        // proxy returns {status, headers, body(base64)} — the exact shape Obsidian expects.
+        return { status: j.status, headers: j.headers || {}, body: j.body || '' };
+      }
+
       const reqHeaders = Object.assign({}, headers || {});
       // case-insensitive check — a mixed-case user header (e.g. 'Content-type')
       // must not be duplicated (Avigail finding).
