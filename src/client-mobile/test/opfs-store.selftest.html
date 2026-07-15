@@ -131,6 +131,16 @@
         assert(typeof uri === 'string' && uri.startsWith('blob:'), 'getUri returns blob: URL');
         assert((await (await fetch(uri)).text()) === 'Hi', 'getUri blob resolves to file content');
 
+        // 13. getUri על שורש לא זורק ומחזיר uri string (המקרה שאובסידיאן קורא ב-vault-open)
+        const rootUri = await s.getUri({ path: '' });
+        assert(rootUri && typeof rootUri.uri === 'string' && rootUri.uri.length > 0, 'getUri("") returns non-empty uri, no throw');
+        // 14. getUri על תיקייה לא זורק
+        const dirUri = await s.getUri({ path: 'Notes' });
+        assert(dirUri && typeof dirUri.uri === 'string' && dirUri.uri.length > 0, 'getUri(dir) returns uri, no throw');
+        // 15. getUri על קובץ עדיין blob (רגרסיה לassertion 12)
+        const fileUri = await s.getUri({ path: 'Notes/renamed.md' });
+        assert(fileUri.uri.startsWith('blob:'), 'getUri(file) still blob: URL');
+
       } catch (err) {
         failCount++;
         const line = document.createElement('div');
