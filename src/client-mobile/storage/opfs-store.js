@@ -111,7 +111,7 @@
   }
 
   function rethrowAsEnoent(e, message) {
-    if (e && e.code) throw e; // already a capError
+    if (e && typeof e.code === 'string') throw e; // real capError (code is a string, e.g. 'ENOENT'); DOMException.code is numeric
     throw capError('ENOENT', message);
   }
 
@@ -332,14 +332,22 @@
       },
 
       async getUri(opts) {
-        try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
-          const fh = await parent.getFileHandle(name, { create: false });
-          const file = await fh.getFile();
-          return { uri: URL.createObjectURL(file) };
-        } catch (e) {
-          rethrowAsEnoent(e, 'getUri: not found: ' + opts.path);
+        // Obsidian calls getUri({path:''}) at vault-open to build a base uri —
+        // this must never throw (mirrors HttpFilesystem.getUri, which returns a
+        // string for any path without touching the FS). Real file → blob URL
+        // (for future attachments); root/dir/missing → synthetic uri, no throw.
+        const rel = String(opts.path || '').replace(/^\/+|\/+$/g, '');
+        if (rel !== '') {
+          try {
+            const { parent, name } = await resolveParent(vaultId, rel, { create: false });
+            const fh = await parent.getFileHandle(name, { create: false });
+            return { uri: URL.createObjectURL(await fh.getFile()) };
+          } catch (_) {
+            // directory or missing → fall through to the synthetic uri below
+            // (no throw, matching HttpFilesystem).
+          }
         }
+        return { uri: 'opfs:/vaults/' + vaultId + (rel ? '/' + rel : '/') };
       },
 
       // No external file-system changes can happen to OPFS behind our back —
