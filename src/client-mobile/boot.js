@@ -243,8 +243,16 @@ const MOBILE_SCRIPTS = [
   }
 
   verifyPromise
-    .then(function(stat) {
+    .then(async function(stat) {
       if (!stat || (!stat.isDirectory && stat.type !== 'directory')) throw new Error('Vault path is not a directory');
+
+      // seed system plugins ל-OPFS לפני טעינת Obsidian (כדי ש-community-plugins.json
+      // יהיה מוכן כש-Obsidian קורא אותו) — local (OPFS) vaults בלבד. לא חוסם את
+      // הפתיחה אם נכשל (retry ב-boot הבא דרך ה-version-gate).
+      if (VAULT_TYPE === 'local' && window.__owOpfsStore && window.__owSeedSystemPlugins) {
+        try { await window.__owSeedSystemPlugins.seedSystemPlugins(window.__owOpfsStore.makeStore(VAULT_ID)); }
+        catch (e) { console.warn('[ow] seed system plugins failed', e); }
+      }
 
       setStatus('Loading Obsidian mobile...');
       console.log('[obsidian-web] vault ok, injecting mobile scripts');
