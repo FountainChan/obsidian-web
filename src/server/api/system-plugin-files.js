@@ -32,13 +32,28 @@ const MIME_BY_EXT = {
   '.css': 'text/css',
 };
 
+// Which system plugins to auto-seed into OPFS vaults, and whether to enable
+// them. Default: ONLY the lightweight layout switcher (enabled). Heavier /
+// opt-in plugins like obsidian-livesync stay out of the auto-seed — the user
+// installs them via Community plugins → Browse when they want them.
+// A deployment (e.g. the Cloudflare edge build) can pre-seed more, optionally
+// DISABLED (files land in OPFS but the plugin is not added to the enabled list):
+//   SYSTEM_PLUGINS_SEED='obsidian-web-layout'          (comma list — seeded + enabled)
+//   SYSTEM_PLUGINS_SEED_DISABLED='obsidian-livesync'   (comma list — seeded, NOT enabled)
+function parseList(v) { return (v || '').split(',').map((s) => s.trim()).filter(Boolean); }
+const SEED_ENABLED = new Set(parseList(process.env.SYSTEM_PLUGINS_SEED || 'obsidian-web-layout'));
+const SEED_DISABLED = new Set(parseList(process.env.SYSTEM_PLUGINS_SEED_DISABLED));
+
 function createSystemPluginFilesRouter() {
   const router = express.Router();
 
-  // Manifest: for each known system plugin, its version (from manifest.json)
-  // and the list of files actually present in its directory on disk.
+  // Manifest: only the plugins configured for auto-seed (see SEED_ENABLED /
+  // SEED_DISABLED above), each with its version, on-disk files, and whether it
+  // should be enabled after seeding.
   router.get('/system-plugins', (req, res) => {
-    const plugins = getSystemPluginIds().map((id) => {
+    const plugins = getSystemPluginIds()
+      .filter((id) => SEED_ENABLED.has(id) || SEED_DISABLED.has(id))
+      .map((id) => {
       const dir = getSystemPluginDir(id);
       let version = '0.0.0';
       try {
@@ -57,7 +72,7 @@ function createSystemPluginFilesRouter() {
         });
       } catch (_) { /* dir vanished mid-request: empty file list */ }
 
-      return { id, version, files };
+      return { id, version, files, enabled: SEED_ENABLED.has(id) };
     });
     res.json({ plugins });
   });

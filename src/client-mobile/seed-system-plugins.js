@@ -31,7 +31,9 @@
 
       let seededVer = null;
       try { seededVer = (await store.readFile({ path: marker, encoding: 'utf8' })).data; } catch (_) {}
-      if (seededVer === p.version) { enabled.push(p.id); continue; }   // כבר seeded בגרסה זו → הפעל, דלג
+      // p.enabled===false → seed the files but DON'T add to community-plugins.json
+      // (installed-but-disabled; user enables it manually). Default/undefined = enabled.
+      if (seededVer === p.version) { if (p.enabled !== false) enabled.push(p.id); continue; }   // כבר seeded → (הפעל?), דלג
 
       // אם קובץ כלשהו נכשל — אל תסמן marker ואל תפעיל (אחרת plugin שבור תקוע
       // ולא מתעדכן; ה-boot הבא ינסה שוב כי המ-marker לא ישקף את הגרסה הנוכחית).
@@ -45,7 +47,7 @@
       }
       if (allOk) {
         await store.writeFile({ path: marker, data: p.version, encoding: 'utf8' });
-        enabled.push(p.id);
+        if (p.enabled !== false) enabled.push(p.id);   // ‏disabled → ‏seeded ‏אבל ‏לא ‏מופעל
       } else {
         console.warn('[ow] system plugin ' + p.id + ' seed incomplete — retry בboot הבא');
       }
