@@ -58,6 +58,13 @@
   <script src="/client-mobile/bootstrap-lookup.js?v=1"></script>
   <script src="/client-mobile/cache-invalidation.js?v=1"></script>
 
+  <!-- 3b. seed-on-boot של system plugins (מתג obsidian-web-layout וכו') ל-OPFS
+       (local) vaults — server vaults מקבלים אותם דרך overlay צד-שרת קיים
+       (/api/fs). חייב לפני boot.js כדי ש-window.__owSeedSystemPlugins יהיה
+       קיים כש-boot.js קורא לו אחרי אימות ה-vault. ראה
+       docs/plans/opfs-seed-system-plugins.md §3. -->
+  <script src="/client-mobile/seed-system-plugins.js?v=1"></script>
+
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected
        DYNAMICALLY by boot.js after vault verification — same mechanism as
