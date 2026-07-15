@@ -40,6 +40,15 @@ const MOBILE_SCRIPTS = [
   var params  = new URLSearchParams(location.search);
   var VAULT_ID = params.get('vault') || localStorage.getItem('obsidian-web:lastVaultId') || '';
 
+  // Vault type: 'local' (OPFS, no server round-trip) or 'server' (HTTP
+  // /api/fs). Determined by presence in the browser-side local vault
+  // registry (window.__owLocalVaults, loaded synchronously via <script>
+  // before boot.js — see index.html loading order).
+  var VAULT_TYPE = (window.__owLocalVaults && window.__owLocalVaults.has(VAULT_ID)) ? 'local' : 'server';
+  window.__owVaultType = VAULT_TYPE;
+  window.__owVaultId   = VAULT_ID;
+  console.log('[obsidian-web] vault type:', VAULT_TYPE, 'id:', VAULT_ID);
+
   if (!VAULT_ID && location.pathname !== '/starter') {
     location.href = '/starter';
     return;
@@ -214,49 +223,70 @@ const MOBILE_SCRIPTS = [
 
   setStatus('Verifying vault...');
 
-  // אמת שה-vault קיים על השרת (stat על ה-root)
-  fetch('/api/fs/stat?vault=' + encodeURIComponent(VAULT_ID) + '&path=')
-    .then(function(res) {
-      if (!res.ok) throw new Error('Vault not found (HTTP ' + res.status + ')');
-      return res.json();
-    })
+  // אמת שה-vault קיים: local → OPFS getDirectoryHandle (idempotent, אין
+  // bootstrap בשרת ל-local); server → HTTP stat על ה-root (כמו קודם).
+  var verifyPromise;
+  if (VAULT_TYPE === 'local') {
+    verifyPromise = (async function () {
+      if (!window.__owOpfsStore) throw new Error('OPFS store not loaded');
+      var root = await navigator.storage.getDirectory();
+      var vaults = await root.getDirectoryHandle('vaults', { create: true });
+      await vaults.getDirectoryHandle(VAULT_ID, { create: true });   // idempotent
+      return { isDirectory: true };
+    })();
+  } else {
+    verifyPromise = fetch('/api/fs/stat?vault=' + encodeURIComponent(VAULT_ID) + '&path=')
+      .then(function (res) {
+        if (!res.ok) throw new Error('Vault not found (HTTP ' + res.status + ')');
+        return res.json();
+      });
+  }
+
+  verifyPromise
     .then(function(stat) {
       if (!stat || (!stat.isDirectory && stat.type !== 'directory')) throw new Error('Vault path is not a directory');
 
       setStatus('Loading Obsidian mobile...');
       console.log('[obsidian-web] vault ok, injecting mobile scripts');
 
-      // ── Bootstrap fetch (parallel to script injection) ──────────────────
+      // ── Bootstrap fetch (parallel to script injection) — SERVER VAULTS ONLY.
       // /api/bootstrap returns the entire .obsidian/ tree + vault content
       // + dirs in one pre-compressed response. We expose it on
       // window.__owBootstrapCache so capacitor-shim's Filesystem.readFile/
       // stat/readdir can answer from cache instead of round-tripping per
       // file. watchAndStatAll awaits __owBootstrapPromise instead of
       // re-fetching. See docs/plans/mobile-bootstrap-cache.md.
-      var bootstrapPromise = fetch(
-        '/api/bootstrap?vault=' + encodeURIComponent(VAULT_ID) + '&full=1',
-        { headers: { 'Accept-Encoding': 'br, gzip' } },
-      )
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (data) {
-          if (!data) return null;
-          if (data.disabled) {
-            console.log('[obsidian-web] bootstrap disabled by server, all FS reads will round-trip');
+      //
+      // Local vaults have no server bootstrap endpoint (static-file server
+      // only, per brief §2 scope boundary) — OpfsStore.watchAndStatAll
+      // supplies the file tree directly from OPFS, no fetch needed. See
+      // docs/plans/opfs-wire.md §4 Commit 1(ג).
+      if (VAULT_TYPE === 'server') {
+        var bootstrapPromise = fetch(
+          '/api/bootstrap?vault=' + encodeURIComponent(VAULT_ID) + '&full=1',
+          { headers: { 'Accept-Encoding': 'br, gzip' } },
+        )
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (!data) return null;
+            if (data.disabled) {
+              console.log('[obsidian-web] bootstrap disabled by server, all FS reads will round-trip');
+              window.__owBootstrapCache = null;
+              return null;
+            }
+            window.__owBootstrapCache = data;
+            var fileCount = data.fs ? Object.keys(data.fs).length : 0;
+            var capped = data.capped ? ' (CAPPED: ' + data.cappedReason + ')' : '';
+            console.log('[obsidian-web] bootstrap loaded: ' + fileCount + ' files cached' + capped);
+            return data;
+          })
+          .catch(function (err) {
+            console.warn('[obsidian-web] bootstrap failed:', err && err.message || err);
             window.__owBootstrapCache = null;
             return null;
-          }
-          window.__owBootstrapCache = data;
-          var fileCount = data.fs ? Object.keys(data.fs).length : 0;
-          var capped = data.capped ? ' (CAPPED: ' + data.cappedReason + ')' : '';
-          console.log('[obsidian-web] bootstrap loaded: ' + fileCount + ' files cached' + capped);
-          return data;
-        })
-        .catch(function (err) {
-          console.warn('[obsidian-web] bootstrap failed:', err && err.message || err);
-          window.__owBootstrapCache = null;
-          return null;
-        });
-      window.__owBootstrapPromise = bootstrapPromise;
+          });
+        window.__owBootstrapPromise = bootstrapPromise;
+      }
 
       // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false)
       var loaded = 0;
