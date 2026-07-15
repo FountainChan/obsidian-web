@@ -73,6 +73,14 @@ function fetchUrl(urlStr, method, reqHeaders, body, redirectsLeft) {
         let nextUrl;
         try { nextUrl = new URL(res.headers.location, urlStr).toString(); }
         catch (e) { return reject(e); }
+        // SSRF guard: the redirect target must ALSO be allow-listed. GitHub's
+        // release CDN (release-assets/objects.githubusercontent.com) is covered
+        // by the `.githubusercontent.com` rule, so real downloads still follow;
+        // a redirect to an internal/metadata host (169.254.169.254, localhost)
+        // is refused.
+        if (!isAllowed(nextUrl)) {
+          return reject(new Error('redirect to disallowed host blocked'));
+        }
         let crossHost = true;
         try { crossHost = new URL(nextUrl).hostname !== parsed.hostname; } catch (_) {}
         const nextHeaders = { ...reqHeaders };
