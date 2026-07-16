@@ -109,6 +109,19 @@ const MOBILE_SCRIPTS = [
     localStorage.setItem('obsidian-web:lastVaultId', VAULT_ID);
     localStorage.setItem('mobile-selected-vault', VAULT_ID);
     localStorage.setItem('enable-plugin-' + VAULT_ID, 'true');
+
+    // Bug 1 (calev NBug1): הנייטיב "ניהול כספות"/close עושה
+    // removeItem('mobile-selected-vault') + location.reload() — reload *רגיל*
+    // ש**משמר את ה-query string**. אחרי create/switch ה-URL הוא
+    // '/mobile?vault=<id>', כך שה-reload היה שומר את ?vault= ו-boot:41 היה
+    // עושה auto-resume → ה-close מובס. מרגע שהכספת פתוחה, מקור-האמת הוא
+    // 'mobile-selected-vault' (נכתב זה עתה) — ה-?vault= ב-URL כבר מיותר.
+    // מסירים אותו (replaceState, בלי reload) כדי שה-close הבא ינחת על URL
+    // נקי → מסך-הפתיחה. Deep-links ו-navigateToVault עדיין עובדים (boot קרא
+    // את ?vault= לפני ההסרה), ו-reload ידני מתחדש מ-mobile-selected-vault.
+    if (params.get('vault') && window.history && history.replaceState) {
+      try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    }
   }
 
   // ── Platform overrides — applied BEFORE app.js loads ──────────────────────
