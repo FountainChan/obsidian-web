@@ -264,23 +264,21 @@ test('remove returns 404 when vault is not in registry', async (t) => {
   assert.equal(body.ok, false);
 });
 
-test('starter route serves the wrapped Obsidian starter entry', async (t) => {
+test('starter route redirects to the mobile entry point', async (t) => {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'obsidian-web-'));
   t.after(() => fsp.rm(tmp, { recursive: true, force: true }));
 
-  const clientPath = path.join(tmp, 'client');
-  await fsp.mkdir(clientPath);
-  await fsp.writeFile(path.join(clientPath, 'starter.html'), '<!doctype html><title>starter</title>');
-
   const server = await startTestServer({
-    clientPath,
+    clientMobilePath: path.join(tmp, 'client-mobile'),
     obsidianPath: path.join(tmp, 'obsidian'),
     registryPath: path.join(tmp, 'vaults.json'),
     vaultPath: tmp,
   });
   t.after(server.close);
 
-  const response = await fetch(server.baseUrl + '/starter');
-  assert.equal(response.status, 200);
-  assert.match(await response.text(), /starter/);
+  // redirect: 'manual' — otherwise fetch/undici follows the 302 to / and
+  // returns a 200, which would make this assertion meaningless.
+  const response = await fetch(server.baseUrl + '/starter', { redirect: 'manual' });
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), '/');
 });
