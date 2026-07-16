@@ -38,7 +38,7 @@ const MOBILE_SCRIPTS = [
 
   // ── Vault selection ────────────────────────────────────────────────────────
   var params  = new URLSearchParams(location.search);
-  var VAULT_ID = params.get('vault') || localStorage.getItem('obsidian-web:lastVaultId') || '';
+  var VAULT_ID = params.get('vault') || '';           // deep-link בלבד גובר
 
   // ── מסך-פתיחה נייטיב — helpers (opfs-ux) ───────────────────────────────────
   // הנייטיב (`.mobile-vault-chooser-screen`) שומר בחירת-vault תחת
@@ -60,13 +60,22 @@ const MOBILE_SCRIPTS = [
     return null;
   }
 
-  // מסך-הפתיחה הנייטיב שומר את בחירת המשתמש תחת 'mobile-selected-vault' —
-  // אימות מול registry/known-ids (פער 1 + finding 2 R1/R2) לפני שמשתמשים בו
-  // כ-VAULT_ID, כדי לא ליפול ל-loop כש-sel יתום (stale/מוסר).
+  // מודל הנייטיב: 'mobile-selected-vault' = "כספת פתוחה/נבחרה" — מקור-האמת
+  // (Bug 1, brief §0/§3א). היעדרו פירושו native close/"ניהול כספות" (quick
+  // action 'close-vault' מוחק את המפתח ועושה reload) — כוונה מפורשת לחזור
+  // למסך-הפתיחה, ולכן *לא* נופלים חזרה ל-lastVaultId (זו הייתה הסיבה
+  // שהמסך לא חזר: lastVaultId שלנו נשאר מלא כי הנייטיב לא מנקה אותו).
+  // אם sel קיים אבל לא ניתן לפענוח מול הregistry (יתום/stale) — fallback
+  // ל-lastVaultId, כדי לא לשבור server-vault resume (§3א, DoD#4/#5).
   if (!VAULT_ID) {
-    var sel = localStorage.getItem('mobile-selected-vault') || '';
-    var selId = owNativeVaultIdFromValue(sel);
-    if (selId) VAULT_ID = selId;
+    var sel = localStorage.getItem('mobile-selected-vault');
+    if (sel) {
+      VAULT_ID = owNativeVaultIdFromValue(sel) || localStorage.getItem('obsidian-web:lastVaultId') || '';
+    } else {
+      // native close/"ניהול כספות" הסיר את מפתח הבחירה → מנקים lastVaultId
+      // (פעם אחת, אין reload נוסף — אין loop) ומראים את מסך-הפתיחה הנייטיב.
+      localStorage.removeItem('obsidian-web:lastVaultId');
+    }
   }
 
   // Vault type: 'local' (OPFS, no server round-trip), 'folder' (real
