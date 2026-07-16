@@ -60,6 +60,17 @@ const MOBILE_SCRIPTS = [
     return null;
   }
 
+  // navigateToVault — **relative** entry-path (brief §3ב finding 1, §9 Q2):
+  // location.pathname (not absolute '/?vault=') so the entry stays whichever
+  // route served this page — CF serves the mobile client at '/', local dev
+  // serves it at '/mobile'. An absolute '/?vault=' would hit the *desktop*
+  // client locally (index.js:77, doesn't know about __owLocalVaults) and
+  // "lose" the OPFS vault. Used by both the Create-vault interceptor below
+  // and the native vault-open bridge (Bug 2b fix).
+  function navigateToVault(id) {
+    location.href = location.pathname + '?vault=' + encodeURIComponent(id);
+  }
+
   // מודל הנייטיב: 'mobile-selected-vault' = "כספת פתוחה/נבחרה" — מקור-האמת
   // (Bug 1, brief §0/§3א). היעדרו פירושו native close/"ניהול כספות" (quick
   // action 'close-vault' מוחק את המפתח ועושה reload) — כוונה מפורשת לחזור
@@ -338,8 +349,11 @@ const MOBILE_SCRIPTS = [
   // ה-VAULT_ID/boot.js שלנו. נקודת-העיגון האמינה היחידה: register תמיד כותב
   // ל-localStorage['mobile-selected-vault'] רגע לפני הפתיחה הישירה. מיירטים
   // את הכתיבה הזו (monkey-patch ל-localStorage.setItem, מותקן רק בזרימת
-  // no-vault) ומנווטים בעצמנו ל-/mobile?vault=<id> — כך זרימת ה-boot.js
-  // הרגילה (OPFS/folder/server, seed system plugins וכו') רצה כרגיל.
+  // no-vault) ומנווטים בעצמנו ל-vault שנבחר — כך זרימת ה-boot.js הרגילה
+  // (OPFS/folder/server, seed system plugins וכו') רצה כרגיל.
+  // Bug 2b (brief §3ג, finding 5): navigateToVault (relative) במקום
+  // '/mobile?vault=' הקשיח — שבר את CF (שם ה-entry הוא '/', אין route
+  // '/mobile'). relative שומר גם CF וגם מקומי (זהה ל-Bug 2 finding 1).
   function installNativeVaultOpenBridge() {
     if (window.__owNativeVaultBridgeInstalled) return;
     window.__owNativeVaultBridgeInstalled = true;
@@ -348,12 +362,76 @@ const MOBILE_SCRIPTS = [
       if (key === 'mobile-selected-vault') {
         var id = owNativeVaultIdFromValue(value);
         if (id) {
-          location.href = '/mobile?vault=' + encodeURIComponent(id);
+          navigateToVault(id);
           return;
         }
       }
       return origSetItem(key, value);
     };
+  }
+
+  // ── מסך-פתיחה נייטיב (no-vault) — Create-vault interceptor (Bug 2) ─────────
+  // executor spike (§0): onCreateVault הנייטיב (בשני המסכים האפשריים —
+  // `.mobile-onboarding` first-run "Configure your new vault" ו-המודל
+  // `.mobile-vault-chooser-screen` "Create new vault") קורא בסופו של דבר
+  // Filesystem.mkdir על ה-vault החדש. במצב no-vault __owVaultType='server'
+  // (אין vault עדיין) → מנותב ל-/api/fs/mkdir → 404 (אין שרת שיודע ליצור
+  // vault-id חדש בלי ליצור אותו קודם ב-registry שלנו) — no-op בפועל.
+  // אימות אמפירי (spike, /tmp/mnp-spike4.js): מאזין click **capture-phase
+  // שמותקן על `document`** (לא על הכפתור) חוסם את ה-handler הנייטיב גם
+  // כשמותקן אחרי שההandler כבר רשום על הכפתור — listeners על אותו element
+  // רצים לפי סדר-רישום ללא קשר ל-capture flag (capture אמיתי דורש ancestor
+  // בנתיב ה-propagation, לא את ה-target עצמו).
+  function installCreateVaultInterceptor() {
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest &&
+        e.target.closest('.mobile-onboarding button.mod-cta, .mobile-vault-chooser-screen button.mod-cta');
+      if (!btn) return;
+      var btnText = (btn.textContent || '').trim();
+      if (btnText !== 'Create a vault' && btnText !== 'Create') return;   // לא זה כפתור ה-Create (למשל "Continue without sync")
+
+      // הטקסט "Create a vault" מופיע גם בכפתור-ה-mod-cta של מסך-הפתיחה
+      // הראשוני (welcome screen, "Your thoughts are yours") — שמוביל לצעד
+      // הבא (sync-intro) ולא ליצירה בפועל. הצעד היחיד שבו יש input[type=text]
+      // בתוך אותו container הוא המסך האמיתי ("Configure your new vault" /
+      // מודל "Create new vault") — היעדרו מסמן שזה עדיין לא צעד היצירה,
+      // לא DOM שביר; מניחים לnative handler לרוץ כרגיל (ללא interception).
+      var screen = btn.closest('.mobile-onboarding, .mobile-vault-chooser-screen');
+      var nameInput = screen && screen.querySelector('input[type="text"]');
+      if (!screen || !nameInput) return;
+
+      e.preventDefault();
+      e.stopImmediatePropagation();   // עוצר את onCreateVault הנייטיב (מונע את ה-mkdir הנכשל)
+
+      var name = nameInput.value.trim() || 'Untitled';
+      var selectedRadio = screen.querySelector('.mobile-onboarding-radio-option.is-selected');
+      var location_ = 'app';   // ברירת-מחדל בטוחה — לא דורש directory picker/permission
+      if (selectedRadio) {
+        var titleEl = selectedRadio.querySelector('.mobile-onboarding-radio-option-title');
+        var title = (titleEl && titleEl.textContent) || '';
+        location_ = /app storage/i.test(title) ? 'app' : 'external';
+      }
+
+      if (location_ === 'external') {
+        // folder vault — choose()=showDirectoryPicker (opfs-ux) יוצר registry
+        // entry ומחזיר {path:'id/name'}. *** choose() לא מנווט *** (finding 2)
+        // → navigateToVault ידני חובה.
+        window.Capacitor.Plugins.Filesystem.choose()
+          .then(function (r) {
+            if (r && r.path) {
+              var id = owNativeVaultIdFromValue(r.path);
+              if (id) navigateToVault(id);
+            }
+          })
+          .catch(function (err) {
+            // picker בוטל/נכשל — כמו הנייטיב, שקט (canceled) או log בלבד.
+            console.warn('[obsidian-web] Create vault (external) failed:', err && err.message || err);
+          });
+      } else {
+        var id2 = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
+        navigateToVault(id2);   // relative (finding 1) — לא absolute '/?vault='
+      }
+    }, true);   // capture-phase על document — ראה הערה למעלה
   }
 
   // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
@@ -366,6 +444,7 @@ const MOBILE_SCRIPTS = [
   if (!VAULT_ID) {
     setStatus('Loading Obsidian mobile...');
     installNativeVaultOpenBridge();
+    installCreateVaultInterceptor();
     seedNativeVaultList()
       .catch(function (err) { console.warn('[obsidian-web] seedNativeVaultList failed:', err); })
       .then(function () {
