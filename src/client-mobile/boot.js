@@ -40,6 +40,35 @@ const MOBILE_SCRIPTS = [
   var params  = new URLSearchParams(location.search);
   var VAULT_ID = params.get('vault') || localStorage.getItem('obsidian-web:lastVaultId') || '';
 
+  // ── מסך-פתיחה נייטיב — helpers (opfs-ux) ───────────────────────────────────
+  // הנייטיב (`.mobile-vault-chooser-screen`) שומר בחירת-vault תחת
+  // 'mobile-selected-vault'. אנחנו כותבים לשם ערכים בצורה '<id>/<name>'
+  // (executor spike: docs/plans/opfs-ux.md §3ה — הפורמט האמיתי ש-Obsidian
+  // מצפה לו ב-Lte הוא מערך של path-strings גולמיים, לא אובייקטים {name,
+  // location,storageType} כפי שהבריף המקורי הניח; ve()/basename מחלץ את השם
+  // מהמחרוזת עצמה — לכן 'id/name' נותן גם id-חילוץ נקי וגם שם קריא).
+  // owNativeVaultIdFromValue מחלץ את ה-id ומאמת מול registry מקומי
+  // (local/folder) או ow-known-vault-ids (גם server) — למניעת loop על ערך יתום.
+  function owNativeVaultIdFromValue(value) {
+    if (!value) return null;
+    var slash = value.indexOf('/');
+    var id = slash !== -1 ? value.slice(0, slash) : value;
+    if (window.__owLocalVaults && window.__owLocalVaults.get(id)) return id;
+    var known = [];
+    try { known = JSON.parse(localStorage.getItem('ow-known-vault-ids') || '[]'); } catch (e) {}
+    if (known.indexOf(id) !== -1) return id;
+    return null;
+  }
+
+  // מסך-הפתיחה הנייטיב שומר את בחירת המשתמש תחת 'mobile-selected-vault' —
+  // אימות מול registry/known-ids (פער 1 + finding 2 R1/R2) לפני שמשתמשים בו
+  // כ-VAULT_ID, כדי לא ליפול ל-loop כש-sel יתום (stale/מוסר).
+  if (!VAULT_ID) {
+    var sel = localStorage.getItem('mobile-selected-vault') || '';
+    var selId = owNativeVaultIdFromValue(sel);
+    if (selId) VAULT_ID = selId;
+  }
+
   // Vault type: 'local' (OPFS, no server round-trip), 'folder' (real
   // directory picked via showDirectoryPicker, also OPFS-store-backed — see
   // capacitor-shim's fsBackend), or 'server' (HTTP /api/fs). Determined by
@@ -52,10 +81,9 @@ const MOBILE_SCRIPTS = [
   window.__owVaultId   = VAULT_ID;
   console.log('[obsidian-web] vault type:', VAULT_TYPE, 'id:', VAULT_ID);
 
-  if (!VAULT_ID && location.pathname !== '/starter') {
-    location.href = '/starter';
-    return;
-  }
+  // (הוסר guard-הפניה ל-/starter כש-VAULT_ID ריק — brief §3א: no-vault
+  // מזריק עכשיו את מסך-הפתיחה הנייטיב במקום redirect. /starter עדיין מטופל
+  // בהמשך, אחרי setup ה-shims — ראה guard #2 למטה.)
 
   if (VAULT_ID) {
     localStorage.setItem('obsidian-web:lastVaultId', VAULT_ID);
@@ -217,11 +245,125 @@ const MOBILE_SCRIPTS = [
   console.log('[obsidian-web] mobile boot: require + shims installed, vault=' + VAULT_ID);
 
   // ── אימות vault + הזרקה דינמית של scripts ─────────────────────────────────
-  if (!VAULT_ID || location.pathname === '/starter') return;
+  if (location.pathname === '/starter') return;   // ל-/starter דף משלו
 
   var statusEl = document.getElementById('ow-status');
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
+  }
+
+  // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
+  // חולצה מ-for-loop inline (היה כאן במקור) לפונקציה נגישה גם לזרימת
+  // ה-no-vault (מסך-הפתיחה הנייטיב, למטה) וגם לזרימת ה-VAULT_ID הרגילה.
+  function injectMobileScripts() {
+    var loaded = 0;
+    for (var i = 0; i < MOBILE_SCRIPTS.length; i++) {
+      (function (src) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.async = false;
+        s.onload = function () {
+          loaded++;
+          setStatus('Loading Obsidian mobile (' + loaded + '/' + MOBILE_SCRIPTS.length + ')');
+        };
+        s.onerror = function () {
+          console.error('[obsidian-web] failed to load: ' + src);
+          setStatus('Error loading ' + src.split('/').pop());
+        };
+        document.head.appendChild(s);
+      })(MOBILE_SCRIPTS[i]);
+    }
+  }
+
+  // הסרת ספינר (#ow-loading) כש-selector מתרנדר — משותף לשתי הזרימות: זרימת
+  // VAULT_ID רגילה ממתינה ל-.workspace; זרימת ה-no-vault (למטה) ממתינה למסך
+  // הנייטיב עצמו (.mobile-vault-chooser-screen או .mobile-onboarding — ראה
+  // executor spike: ל-Obsidian יש 2 מסכי-כניסה אפשריים, תלוי אם כבר יש
+  // vault אחד לפחות ב-Lte/readdir; שניהם תקפים "מסך-פתיחה נייטיב מרונדר").
+  // בלי זה — הספינר נשאר תקוע מעל המסך הנייטיב (regression שנתפס ב-spike).
+  function removeLoadingOverlayWhen(selector) {
+    var overlay = document.getElementById('ow-loading');
+    if (!overlay) return;
+    if (document.querySelector(selector)) { overlay.remove(); return; }
+    var obs = new MutationObserver(function () {
+      if (document.querySelector(selector)) {
+        overlay.remove();
+        obs.disconnect();
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ── מסך-פתיחה נייטיב (no-vault) — seed רשימת ה-vaults ──────────────────────
+  // מאכלס mobile-external-vaults (Lte של הנייטיב) + ow-known-vault-ids
+  // (משמש גם ע"י owNativeVaultIdFromValue וגם ע"י capacitor-shim's stat()
+  // polyfill). /api/vaults/list מחזיר object map keyed-by-id (לא array —
+  // finding 3 אביגיל) — Object.keys ולא array-iteration.
+  // כל item בפורמט '<id>/<name>' — ראה הערת owNativeVaultIdFromValue למעלה.
+  function seedNativeVaultList() {
+    var localList = window.__owLocalVaults ? window.__owLocalVaults.list() : [];
+    var items = localList.map(function (v) { return v.id + '/' + v.name; });
+    var ids = localList.map(function (v) { return v.id; });
+    return fetch('/api/vaults/list')
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        Object.keys(res || {}).forEach(function (id) {
+          var v = res[id] || {};
+          var name = (v.path || id).split('/').pop();
+          items.push(id + '/' + name);
+          ids.push(id);
+        });
+      })
+      .catch(function () { /* server vaults לא זמינים — ממשיכים עם local/folder בלבד */ })
+      .then(function () {
+        localStorage.setItem('mobile-external-vaults', JSON.stringify(items));
+        localStorage.setItem('ow-known-vault-ids', JSON.stringify(ids));
+      });
+  }
+
+  // ── מסך-פתיחה נייטיב (no-vault) — גישור בחירת/פתיחת-vault ──────────────────
+  // executor spike (docs/plans/opfs-ux.md §3ד/§3ה, finding 4 אביגיל):
+  // register() הנייטיב (הפונקציה שרצה אחרי "Open folder as vault"/לחיצה על
+  // "Open vault" בשורת vault קיים/auto-resume בעלייה) פותח vault ישירות
+  // בזיכרון (window.app=new ete(...)) בלי reload — עוקף לגמרי את זרימת
+  // ה-VAULT_ID/boot.js שלנו. נקודת-העיגון האמינה היחידה: register תמיד כותב
+  // ל-localStorage['mobile-selected-vault'] רגע לפני הפתיחה הישירה. מיירטים
+  // את הכתיבה הזו (monkey-patch ל-localStorage.setItem, מותקן רק בזרימת
+  // no-vault) ומנווטים בעצמנו ל-/mobile?vault=<id> — כך זרימת ה-boot.js
+  // הרגילה (OPFS/folder/server, seed system plugins וכו') רצה כרגיל.
+  function installNativeVaultOpenBridge() {
+    if (window.__owNativeVaultBridgeInstalled) return;
+    window.__owNativeVaultBridgeInstalled = true;
+    var origSetItem = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = function (key, value) {
+      if (key === 'mobile-selected-vault') {
+        var id = owNativeVaultIdFromValue(value);
+        if (id) {
+          location.href = '/mobile?vault=' + encodeURIComponent(id);
+          return;
+        }
+      }
+      return origSetItem(key, value);
+    };
+  }
+
+  // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
+  // אין VAULT_ID תקף (לא ב-?vault=, לא ב-lastVaultId, ולא מ-mobile-selected-
+  // vault תקף — ראה למעלה). ה-shims כבר מותקנים (require/capacitor) — מזריקים
+  // ישירות את ה-bundle הנייטיב; מסך ה-vault-chooser שלו (Setup Sync/Create new
+  // vault/Open folder as vault + רשימה) מתרנדר מלא בלי שינוי (spike §0).
+  // choose()/stat() polyfill + seedNativeVaultList() + הגישור למעלה מחווטים
+  // את הרשימה + הבחירה + open-folder ל-vaults שלנו (folder-vault/OPFS/server).
+  if (!VAULT_ID) {
+    setStatus('Loading Obsidian mobile...');
+    installNativeVaultOpenBridge();
+    seedNativeVaultList()
+      .catch(function (err) { console.warn('[obsidian-web] seedNativeVaultList failed:', err); })
+      .then(function () {
+        injectMobileScripts();
+        removeLoadingOverlayWhen('.mobile-vault-chooser-screen, .mobile-onboarding');
+      });
+    return;
   }
 
   // folder vaults need a re-grant click (user gesture) whenever
@@ -344,36 +486,12 @@ const MOBILE_SCRIPTS = [
         window.__owBootstrapPromise = bootstrapPromise;
       }
 
-      // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false)
-      var loaded = 0;
-      for (var i = 0; i < MOBILE_SCRIPTS.length; i++) {
-        (function(src) {
-          var s = document.createElement('script');
-          s.src = src;
-          s.async = false;
-          s.onload = function() {
-            loaded++;
-            setStatus('Loading Obsidian mobile (' + loaded + '/' + MOBILE_SCRIPTS.length + ')');
-          };
-          s.onerror = function() {
-            console.error('[obsidian-web] failed to load: ' + src);
-            setStatus('Error loading ' + src.split('/').pop());
-          };
-          document.head.appendChild(s);
-        })(MOBILE_SCRIPTS[i]);
-      }
+      // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
+      // חולצה ל-injectMobileScripts() למעלה — נגישה גם לזרימת ה-no-vault.
+      injectMobileScripts();
 
       // הסרת ספינר כשה-workspace מוכן
-      var overlay = document.getElementById('ow-loading');
-      if (overlay) {
-        var spinnerObs = new MutationObserver(function() {
-          if (document.querySelector('.workspace')) {
-            overlay.remove();
-            spinnerObs.disconnect();
-          }
-        });
-        spinnerObs.observe(document.body, { childList: true, subtree: true });
-      }
+      removeLoadingOverlayWhen('.workspace');
 
       // ── Vault switcher click → /starter ──────────────────────────────────
       // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
