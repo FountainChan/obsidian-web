@@ -40,22 +40,24 @@
     list: function () {
       var map = load();
       return Object.entries(map)
-        .map(function (entry) { return { id: entry[0], name: entry[1].name, createdAt: entry[1].createdAt }; })
+        .map(function (entry) { return { id: entry[0], name: entry[1].name, createdAt: entry[1].createdAt, type: entry[1].type || 'local' }; })
         .sort(function (a, b) { return b.createdAt - a.createdAt; });
     },
     get: function (id) {
       var map = load();
-      return map[id] || null;
+      var v = map[id];
+      if (!v) return null;
+      return { name: v.name, createdAt: v.createdAt, type: v.type || 'local' };
     },
     has: function (id) {
       return !!this.get(id);
     },
-    create: function (name) {
+    create: function (name, opts) {
       var map = load();
       var id = uuid();
-      map[id] = { name: name || 'Untitled', createdAt: Date.now() };
+      map[id] = { name: name || 'Untitled', createdAt: Date.now(), type: (opts && opts.type) || 'local' };
       save(map);
-      return { id: id, name: map[id].name };
+      return { id: id, name: map[id].name, type: map[id].type };
     },
     rename: function (id, name) {
       var map = load();
