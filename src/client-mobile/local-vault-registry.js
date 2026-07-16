@@ -6,9 +6,11 @@
  * are served over /api/fs. Backed by localStorage so it persists across
  * reloads without any server involvement.
  *
- * Lives in `client/` (not `client-mobile/`) because both the desktop
- * starter page and the mobile runtime need it — loaded via a <script> tag
- * in each.
+ * Lives in `client-mobile/` — consumed exclusively by the mobile runtime
+ * (index.html, new-local.html, capacitor-shim.js, boot.js,
+ * folder-handle-store.js). The desktop runtime does not use `__owLocalVaults`
+ * at all. Relocated here from `client/` in slice relocate-registry (epic
+ * mobile-first) to decouple the mobile runtime from the desktop tree.
  *
  * See docs/plans/local-vaults-implementation.md → Phase 2a,
  * docs/plans/opfs-wire.md → §4 Commit 0.
