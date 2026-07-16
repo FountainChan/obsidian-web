@@ -157,7 +157,7 @@ function startServer(appConfig = config) {
     console.log('  Obsidian Web');
     console.log('==========================================');
     console.log('  Vault:    ' + appConfig.vaultPath);
-    console.log('  Obsidian: ' + appConfig.obsidianPath);
+    console.log('  Obsidian: ' + appConfig.obsidianMobilePath);
     console.log('  Listening on http://' + appConfig.host + ':' + appConfig.port);
     console.log('==========================================');
 

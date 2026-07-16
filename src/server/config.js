@@ -25,8 +25,8 @@ function parsePort(raw) {
 
 /**
  * Compute a short cache-buster string from the mtimes of all files under
- * the src/client/ (or src/client-mobile/) directory. Changes to any client
- * file automatically produce a new bust value without any manual ?v= bump.
+ * the src/client-mobile/ directory. Changes to any client file automatically
+ * produce a new bust value without any manual ?v= bump.
  *
  * Returns a 6-char hex string, e.g. "a3f7c2".
  */
@@ -56,9 +56,7 @@ function computeClientCacheBust(clientPath) {
   }
 }
 
-const CLIENT_PATH = path.resolve(PROJECT_ROOT, 'src', 'client');
 const CLIENT_MOBILE_PATH = path.resolve(PROJECT_ROOT, 'src', 'client-mobile');
-const OBSIDIAN_PATH = path.resolve(PROJECT_ROOT, 'vendor', 'obsidian');
 const OBSIDIAN_MOBILE_PATH = path.resolve(PROJECT_ROOT, 'vendor', 'obsidian-mobile');
 
 module.exports = {
@@ -66,17 +64,16 @@ module.exports = {
   host: process.env.HOST || '127.0.0.1',
   vaultPath: path.resolve(PROJECT_ROOT, process.env.VAULT_PATH || 'user-data/demo-vault'),
   registryPath: path.resolve(PROJECT_ROOT, process.env.VAULT_REGISTRY || 'user-data/registry.json'),
-  obsidianPath: OBSIDIAN_PATH,
   obsidianMobilePath: OBSIDIAN_MOBILE_PATH,
-  clientPath: CLIENT_PATH,
   clientMobilePath: CLIENT_MOBILE_PATH,
   projectRoot: PROJECT_ROOT,
   appVersion: APP_VERSION,
   vaultBase: VAULT_BASE,
-  // Computed once at startup from src/client/ + src/client-mobile/ file mtimes.
-  // Used by index.html, starter.html and client-mobile/index.html to inject
-  // ?v=<bust> on all client scripts — no manual ?v=N bump needed.
-  clientCacheBust: computeClientCacheBust(CLIENT_PATH) + computeClientCacheBust(CLIENT_MOBILE_PATH),
+  // Computed once at startup from src/client-mobile/ file mtimes. Used by
+  // client-mobile/index.html to inject ?v=<bust> on all client scripts — no
+  // manual ?v=N bump needed. Mobile is the only runtime (desktop src/client
+  // was archived — see git tag archive/desktop-runtime).
+  clientCacheBust: computeClientCacheBust(CLIENT_MOBILE_PATH),
   // Set WATCH_POLLING=true when the vault lives on a filesystem that does not
   // support inotify (rclone/FUSE, NFS, SMB, …).  Without polling chokidar
   // will never fire any events on those mounts.
