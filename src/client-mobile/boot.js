@@ -594,21 +594,47 @@ const MOBILE_SCRIPTS = [
       // הסרת ספינר כשה-workspace מוכן
       removeLoadingOverlayWhen('.workspace');
 
-      // ── Vault switcher click → /starter ──────────────────────────────────
+      // ── Vault switcher click → openVaultChooser ──────────────────────────
       // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
       // הוא true. ב-patch-obsidian-mobile.js שינינו את התנאי הזה ל-!isMobile כדי
       // שהפאנל יופיע גם במצב desktop-layout. אבל ה-click handler המקורי בתוך
       // הפאנל קורא ל-`electron.ipcRenderer.sendSync("vault" | "vault-list" |
       // "vault-open")` — שלא קיים ב-mobile runtime (אין shim ל-window.electron
       // ב-client-mobile/). תופסים את הקליק בשלב ה-capture, חוסמים את ה-handler
-      // המקורי, ומנווטים ל-/starter שיודע לעשות את אותו דבר ועוד.
+      // המקורי, ומנווטים ישירות דרך openVaultChooser() (במקום /starter — פוסט
+      // mobile-native-polish /starter→302→/ עם mobile-selected-vault עדיין מוגדר
+      // גורם ל-resume במקום chooser, ראה docs/plans/vault-switcher-fix.md §3א).
       document.addEventListener('click', function (e) {
         var target = e.target && e.target.closest && e.target.closest('.workspace-drawer-vault-switcher');
         if (!target) return;
         e.stopImmediatePropagation();
         e.preventDefault();
-        location.href = '/starter';
+        if (window.app && typeof window.app.openVaultChooser === 'function') window.app.openVaultChooser();
+        else location.href = '/starter';   // fallback
       }, true);
+
+      // ── "נהל כספות" <select> → openVaultChooser (polyfill) ────────────────
+      // ה-<select> "נהל כספות" (vault-switcher, תחתית-שמאל) מקבל אופציה אחת
+      // בלבד: "manage-vaults" (רשימת ה-vaults ריקה כי Bte() מחזיר ריק כשכספת
+      // פתוחה — out-of-scope, ראה §2). מכיוון שהאופציה היחידה כבר הערך הנבחר,
+      // הקשה עליה לא מפעילה `change` (הדפדפן לא יורה change באותה בחירה) →
+      // openVaultChooser() לא נקרא → no-op. תופסים pointerdown+mousedown
+      // (לפני native picker, לא change) בשלב ה-capture. guard opts.length<=1:
+      // אם רשימת ה-vaults תאוכלס בעתיד (multi-option) → native change עובד →
+      // לא מיירטים (docs/plans/vault-switcher-fix.md §3ב, §6).
+      ['pointerdown', 'mousedown'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) {
+          var sel = e.target && e.target.closest ? e.target.closest('select') : null;
+          if (!sel) return;
+          var opts = Array.prototype.slice.call(sel.options);
+          if (opts.some(function (o) { return o.value === 'manage-vaults'; }) && opts.length <= 1) {
+            e.preventDefault(); e.stopImmediatePropagation();   // מנסה לדכא את ה-native picker
+            if (window.app && typeof window.app.openVaultChooser === 'function') {
+              window.app.openVaultChooser();   // אומת: removeItem('mobile-selected-vault')+reload(500ms)→chooser
+            }
+          }
+        }, true);
+      });
     })
     .catch(function(err) {
       console.warn('[obsidian-web] vault check failed:', err.message);
