@@ -8,7 +8,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const APP_VERSION = '1.12.7';
 
 // Virtual path that the renderer sees as its vault root.
-// Must match the value the client shims use (src/client/boot.js VAULT_BASE).
+// Must match the value the client shims use (src/client-mobile/shims VAULT_BASE).
 const VAULT_BASE = '/vault';
 
 const crypto = require('crypto');
