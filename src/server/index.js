@@ -2,9 +2,10 @@
  * Obsidian Web - HTTP/WebSocket server.
  *
  * Serves three things:
- *   1. The custom src/client/ + src/client-mobile/ files (boot.js, shims, HTML).
- *   2. Obsidian's untouched renderer files from vendor/obsidian/ and
- *      vendor/obsidian-mobile/.
+ *   1. The custom src/client-mobile/ files (boot.js, shims, HTML) — the
+ *      mobile runtime is the only runtime (desktop src/client was archived,
+ *      see git tag archive/desktop-runtime).
+ *   2. Obsidian's untouched renderer files from vendor/obsidian-mobile/.
  *   3. A file system API at /api/fs/* and a watcher at /api/watch.
  */
 
@@ -73,28 +74,28 @@ function createApp(appConfig = {}) {
     }
   }
 
-  // Custom entry point - our index.html, not Obsidian's.
+  // Entry point - mobile is now the only runtime, served at / (finale of the
+  // mobile-first epic; see docs/decisions for the collapse-desktop rationale).
   app.get('/', (req, res) => {
-    sendHtmlWithCacheBust(res, path.join(appConfig.clientPath, 'index.html'));
+    sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
-  app.get(['/starter', '/starter.html'], (req, res) => {
-    sendHtmlWithCacheBust(res, path.join(appConfig.clientPath, 'starter.html'));
-  });
-
-  // Mobile client entry point.
+  // Mobile client entry point (alias, backwards-compatible with existing
+  // tunnels/links that already point at /mobile).
   app.get('/mobile', (req, res) => {
     sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
-  // Static files - order matters: client/ first, then obsidian/.
-  app.use('/client', express.static(appConfig.clientPath, {
-    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
-  }));
+  // /starter no longer serves the desktop starter shell (removed along with
+  // src/client). Redirect (not 404) because src/client-mobile/boot.js:610/617
+  // still navigate to /starter on vault-switcher click and error recovery —
+  // the redirect lands them back on the native mobile screen at /.
+  app.get(['/starter', '/starter.html'], (req, res) => {
+    res.redirect(302, '/');
+  });
+
+  // Static files.
   app.use('/client-mobile', express.static(appConfig.clientMobilePath, {
-    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
-  }));
-  app.use('/obsidian', express.static(appConfig.obsidianPath, {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
   }));
   app.use('/obsidian-mobile', express.static(appConfig.obsidianMobilePath, {
@@ -103,10 +104,12 @@ function createApp(appConfig = {}) {
 
   // Obsidian's renderer fetches resources via absolute paths like /i18n/he.txt
   // and /lib/... because under Electron those resolve via the app:// protocol
-  // to the bundle root. Mirror them onto the obsidian/ tree.
-  const RESOURCE_DIRS = ['i18n', 'lib', 'public', 'sandbox'];
+  // to the bundle root. Mirror them onto the obsidian-mobile/ tree (the only
+  // runtime left — obsidian-mobile ships its own i18n/ and lib/, no
+  // public/sandbox).
+  const RESOURCE_DIRS = ['i18n', 'lib'];
   for (const dir of RESOURCE_DIRS) {
-    app.use('/' + dir, express.static(path.join(appConfig.obsidianPath, dir), {
+    app.use('/' + dir, express.static(path.join(appConfig.obsidianMobilePath, dir), {
       setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
     }));
   }
@@ -122,7 +125,7 @@ function createApp(appConfig = {}) {
   const ROOT_FILES = ['worker.js', 'sim.js'];
   for (const f of ROOT_FILES) {
     app.get('/' + f, (req, res) => {
-      res.sendFile(path.join(appConfig.obsidianPath, f), {
+      res.sendFile(path.join(appConfig.obsidianMobilePath, f), {
         headers: { 'Cache-Control': 'no-cache' },
       });
     });
@@ -154,7 +157,7 @@ function startServer(appConfig = config) {
     console.log('  Obsidian Web');
     console.log('==========================================');
     console.log('  Vault:    ' + appConfig.vaultPath);
-    console.log('  Obsidian: ' + appConfig.obsidianPath);
+    console.log('  Obsidian: ' + appConfig.obsidianMobilePath);
     console.log('  Listening on http://' + appConfig.host + ':' + appConfig.port);
     console.log('==========================================');
 

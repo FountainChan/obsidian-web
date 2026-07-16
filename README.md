@@ -1,6 +1,6 @@
 # obsidian-web
 
-Run Obsidian's desktop app in a standard browser — no Electron needed.
+Run Obsidian in a standard browser — no Electron, no native app needed.
 
 **[Live Demo →](https://obsidian-web.tzlev.ovh)**
 
@@ -34,16 +34,17 @@ The browser version can load faster than the desktop app. Instead of Obsidian re
 
 ```
 src/                         our source code
-├── client/                  desktop runtime (loaded at /)
-├── client-mobile/           mobile runtime (loaded at /mobile)
+├── client-mobile/           the (only) runtime, loaded at / (and aliased at /mobile)
 ├── server/                  Node.js HTTP/WS backend
 ├── plugins/                 system plugin overlay (e.g. obsidian-web-layout)
 └── deployments/             provider-specific deployments
     └── cloudflare/          Cloudflare Workers + Durable Object
 
 vendor/                      extracted Obsidian bundles (gitignored)
-├── obsidian/                desktop renderer
-├── obsidian-mobile/         mobile renderer (with build-time patches)
+├── obsidian-mobile/         mobile renderer (with build-time patches) — the only renderer in use
+├── obsidian/                legacy desktop renderer — vestigial, no longer served by the
+│                             server (routes removed in collapse-desktop); kept only because
+│                             scripts/update-obsidian.js still exists (see Notes)
 └── Obsidian.AppImage        source binary
 
 user-data/                   user-facing data
@@ -52,17 +53,22 @@ user-data/                   user-facing data
 
 .tmp/                        intermediate / build artifacts (folder tracked,
                              contents gitignored via internal .gitignore)
-scripts/                     build tooling (update-obsidian, patch-obsidian-mobile)
+scripts/                     build tooling (update-obsidian-mobile, patch-obsidian-mobile;
+                             update-obsidian.js is vestigial, see Notes)
 ```
+
+> **Note**: `src/client/` (the desktop runtime) was removed in the `collapse-desktop` slice —
+> the mobile runtime is now the only runtime, served at both `/` and `/mobile`. The desktop
+> code is still recoverable from git history via the `archive/desktop-runtime` tag.
 
 ---
 
 ## Setup (Node.js server)
 
-Download and extract the latest Obsidian renderer files:
+Download and extract the Obsidian mobile renderer bundle (the only runtime the server serves):
 
 ```bash
-node scripts/update-obsidian.js
+node scripts/update-obsidian-mobile.js && node scripts/patch-obsidian-mobile.js
 ```
 
 Install and run the backend:
@@ -78,36 +84,15 @@ For production (no reload overhead):
 npm start
 ```
 
-Open `http://127.0.0.1:3000`.
-
-Open `http://127.0.0.1:3000/starter` to manage recent vaults and add a
-server folder path as a vault.
+Open `http://127.0.0.1:3000`. `/mobile` also works (backwards-compatible alias, same page).
+`/starter` (the old desktop vault picker) redirects to `/` — it no longer serves a page of
+its own, but existing bookmarks/links still land you on the app instead of a 404.
 
 ## Obsidian Version
 
-`vendor/obsidian/` is generated from the official `obsidianmd/obsidian-releases` GitHub releases and is intentionally ignored by Git.
+### Mobile bundle (`vendor/obsidian-mobile/`) — the only runtime
 
-Useful commands:
-
-```bash
-# latest stable release
-node scripts/update-obsidian.js
-
-# specific release
-node scripts/update-obsidian.js --version 1.12.7
-
-# re-download even if cached
-node scripts/update-obsidian.js --force
-
-# remove cached .asar.gz/.asar after a successful extraction
-node scripts/update-obsidian.js --no-cache
-```
-
-The updater uses the official `obsidian-<version>.asar.gz` release asset, verifies the SHA-256 digest when GitHub provides one, extracts it locally, validates required renderer files, then replaces `obsidian/`.
-
-### Mobile bundle (`vendor/obsidian-mobile/`)
-
-The project ships **two runtimes** — a desktop one at `/` and a mobile one at `/mobile`. The mobile runtime needs the Obsidian Android APK bundle, extracted into `vendor/obsidian-mobile/`. Like `vendor/obsidian/`, this directory is gitignored and downloaded on demand:
+`/` and `/mobile` are both served by the mobile runtime, which needs the Obsidian Android APK bundle extracted into `vendor/obsidian-mobile/`. Like the (now vestigial) `vendor/obsidian/`, this directory is gitignored and downloaded on demand:
 
 ```bash
 # extract vendor/obsidian-mobile/ from the latest Android APK release
@@ -119,12 +104,10 @@ node scripts/update-obsidian-mobile.js --version 1.12.7
 
 This script downloads the official APK, unpacks the `assets/public/` tree to `vendor/obsidian-mobile/`, and **applies four build-time patches** to `vendor/obsidian-mobile/app.js` (via `scripts/patch-obsidian-mobile.js`) that expose `window.__owPlatform`, merge `window.__owPlatformOverrides`, and surface the desktop-layout vault profile panel. If a patch fails to match, the script aborts loudly — that's our signal that the Obsidian minifier changed.
 
-Both runtimes share the same server. Run **both updater scripts** if you want `/` and `/mobile` to work. If you only want one of them, you can run just the corresponding script.
-
-| Runtime URL | Updater | Notes |
-|---|---|---|
-| `/` (desktop) | `node scripts/update-obsidian.js` | Required for legacy fallback |
-| `/mobile` | `node scripts/update-obsidian-mobile.js` | **Preferred runtime.** Applies patches automatically. |
+| Runtime URL | Updater |
+|---|---|
+| `/` | `node scripts/update-obsidian-mobile.js && node scripts/patch-obsidian-mobile.js` |
+| `/mobile` (alias) | same as `/` — identical `index.html` |
 
 ## Configuration
 
@@ -138,7 +121,7 @@ Server environment variables:
 ### Bootstrap configuration
 
 The `/api/bootstrap` endpoint preloads vault content into memory for fast
-boot. Both runtimes (`/` desktop and `/mobile`) consume it. Defaults work
+boot. Both `/` and `/mobile` (the same runtime) consume it. Defaults work
 for most vaults. To customize:
 
 - `BOOTSTRAP_DISABLED=true` — skip the bootstrap entirely. Each FS read
@@ -217,18 +200,22 @@ Environment variables in `wrangler.toml`:
 
 The Node.js server (`src/server/`) can be deployed to any Linux box. A typical setup:
 
-1. Clone the repo and run `node scripts/update-obsidian.js` to get Obsidian's renderer files
+1. Clone the repo and run `node scripts/update-obsidian-mobile.js && node scripts/patch-obsidian-mobile.js` to get Obsidian's renderer files
 2. `cd src/server && npm install && npm start`
 3. Put it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel) with HTTPS
 4. Do not expose the server directly to the internet without auth — there is no application-level authentication
 
 ## Notes
 
-- Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `vendor/obsidian/` or `vendor/obsidian-mobile/`; update wrappers/shims instead.
+- Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `vendor/obsidian-mobile/`; update wrappers/shims instead.
 - The default vault is `user-data/demo-vault/`.
-- The current starter folder picker is prompt-based: enter an absolute server path.
 - Do not bind the server to a public IP without a tunnel or auth layer in front.
 - Current architecture and roadmap are in `PLAN.md`.
+- `vendor/obsidian/` and `scripts/update-obsidian.js` (the legacy desktop renderer + its
+  downloader) are **vestigial** — the server no longer serves any route from them (removed
+  in the `collapse-desktop` slice). They are left in place rather than deleted; if you don't
+  already have `vendor/obsidian/` populated, you don't need it — everything now runs on
+  `vendor/obsidian-mobile/`.
 
 ## Disclaimer
 
