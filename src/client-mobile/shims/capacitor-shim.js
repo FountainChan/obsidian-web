@@ -146,6 +146,27 @@
     return e;
   }
 
+  // ── opfs-ux: native vault-chooser bridge helpers ────────────────────────
+  // The native `.mobile-vault-chooser-screen` (obsidian-mobile/app.js) both
+  // (a) validates every entry of its vault list via Filesystem.stat(id) —
+  // executor spike found this uses RAW path/id strings, not
+  // {name,location,storageType} objects as originally assumed — and
+  // (b) calls Filesystem.stat() again as part of register()'s open-flow
+  // (both "Open folder as vault" and "Open vault" on an existing row).
+  // We seed the list (boot.js's seedNativeVaultList) with '<id>/<name>'
+  // strings; this recognizes either form and confirms it's one of ours.
+  // Only relevant with no vault active (this bridge only matters for the
+  // no-vault chooser screen — never for a real, already-open vault).
+  function owResolveNativeVaultId(p) {
+    if (getVaultId() || !p) return null;   // real vault active — not our bridge's business
+    const slash = p.indexOf('/');
+    const id = slash !== -1 ? p.slice(0, slash) : p;
+    if (window.__owLocalVaults && window.__owLocalVaults.get(id)) return id;
+    let known = [];
+    try { known = JSON.parse(localStorage.getItem('ow-known-vault-ids') || '[]'); } catch (e) {}
+    return known.indexOf(id) !== -1 ? id : null;
+  }
+
   // ── Bootstrap cache invalidation wrappers ────────────────────────────
   // Each mutation method calls these so the in-memory cache populated by
   // boot.js stays in sync with what's on disk. No-ops when the cache is
@@ -308,6 +329,17 @@
     async readdir(opts) {
       const p = fullPath(opts);
 
+      // opfs-ux: no vault active + browsing the External/root — this is the
+      // native mobile-vault-chooser-screen's supplemental "show subfolders
+      // not already in the vault list" scan (readdir(External,"") — brief
+      // §0 spike, gap 2). We have no real "device filesystem" to browse; a
+      // plain round-trip would hit whatever vault the server treats as
+      // default and show ITS subdirectories as fake vaults. Return empty —
+      // seedNativeVaultList()/Lte (mobile-external-vaults) is the real list.
+      if (!getVaultId() && p === '') {
+        return { files: [] };
+      }
+
       if (window.__owBootstrapLookup) {
         const hit = window.__owBootstrapLookup.lookupDir(window.__owBootstrapCache, p);
         if (hit) return { files: hit };
@@ -324,6 +356,16 @@
 
     async stat(opts) {
       const p = fullPath(opts);
+
+      // opfs-ux: recognize our own vault ids (local/folder registry or
+      // server registry, via ow-known-vault-ids) — see owResolveNativeVaultId
+      // above. Needed both for the native list's per-entry validation
+      // (Ote.stat(id) in the chooser screen — brief §0 spike) and for the
+      // "Open folder as vault"/"Open vault" register() flow's own stat()
+      // check. No round-trip: there's no active vault yet to ask the server.
+      if (owResolveNativeVaultId(p) !== null) {
+        return { type: 'directory', size: 0, mtime: 0, ctime: 0, uri: '' };
+      }
 
       if (window.__owBootstrapLookup) {
         const hit = window.__owBootstrapLookup.lookupStat(window.__owBootstrapCache, p);
@@ -396,7 +438,27 @@
     async checkPerms()        { return { publicStorage: 'granted' }; },
     async requestPermissions(){ return { publicStorage: 'granted' }; },
     async requestPerms()      { return { publicStorage: 'granted' }; },
-    async choose()            { return null; },  // Android file picker — not supported
+    // opfs-ux: File System Access API polyfill for the native "Open folder
+    // as vault" flow (brief §3ג). Chromium-only (feature-detected below —
+    // the native onClick handler treats a thrown Error whose message
+    // contains "canceled" as a silent user-cancel, same as picker abort).
+    // Reuses folder-vault's registry (__owLocalVaults) + handle store
+    // (__owFolderHandles) — id/name format matches seedNativeVaultList()'s
+    // 'id/name' convention so the native path-resolver (Android:
+    // e.contains('/') routes to the External fs instance) AND our own
+    // owResolveNativeVaultId() both parse it consistently.
+    async choose() {
+      if (!('showDirectoryPicker' in window)) throw capError('UNSUPPORTED', 'canceled: not supported');
+      let dir;
+      try {
+        dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (e) {
+        throw capError('CANCELED', 'canceled');   // picker dismissed/denied — native swallows this silently
+      }
+      const created = window.__owLocalVaults.create(dir.name, { type: 'folder' });
+      await window.__owFolderHandles.saveHandle(created.id, dir);
+      return { path: created.id + '/' + created.name, isRoot: false };
+    },
 
     async getUri(opts) {
       const p = fullPath(opts);
