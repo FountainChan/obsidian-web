@@ -30,59 +30,10 @@
   'use strict';
 
   // ── low-level OPFS helpers ──────────────────────────────────────────────
-
-  async function rootDir() {
-    return await navigator.storage.getDirectory();
-  }
-
-  async function vaultDir(vaultId, { create = false } = {}) {
-    const root = await rootDir();
-    const vaults = await root.getDirectoryHandle('vaults', { create });
-    return await vaults.getDirectoryHandle(vaultId, { create });
-  }
-
-  // Walk to the parent directory handle of `relPath`, returns {parent, name}.
-  // `create` applies to the vault container AND every intermediate segment —
-  // i.e. create:true auto-creates the whole ancestor chain (mkdir-on-write).
-  async function resolveParent(vaultId, relPath, { create = false } = {}) {
-    const dir = await vaultDir(vaultId, { create });
-    const parts = String(relPath).split('/').filter(Boolean);
-    const name = parts.pop();
-    let cur = dir;
-    for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
-    return { parent: cur, name };
-  }
-
-  // Walk to the directory handle AT `relPath` itself (used by readdir/stat-dir/
-  // rmdir-target/copy-dir-dest). Root ('' or '/') resolves to the vault dir.
-  async function resolveDir(vaultId, relPath, { create = false } = {}) {
-    let cur = await vaultDir(vaultId, { create });
-    const parts = String(relPath || '').split('/').filter(Boolean);
-    for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
-    return cur;
-  }
-
-  // 'file' | 'directory' | null (root '' / '/' is always 'directory')
-  async function statKind(vaultId, relPath) {
-    const normalized = String(relPath || '').replace(/^\/+|\/+$/g, '');
-    if (normalized === '') return 'directory';
-    try {
-      const { parent, name } = await resolveParent(vaultId, normalized, { create: false });
-      try {
-        await parent.getFileHandle(name, { create: false });
-        return 'file';
-      } catch (_) {
-        try {
-          await parent.getDirectoryHandle(name, { create: false });
-          return 'directory';
-        } catch (__) {
-          return null;
-        }
-      }
-    } catch (_) {
-      return null;
-    }
-  }
+  // (root-resolution helpers — resolveParent/resolveDir/statKind — live
+  // inside makeStore now, see "root pluggable" note there: they need access
+  // to the per-store getVaultRoot, which for 'folder' vaults is the picked
+  // FileSystemDirectoryHandle instead of OPFS's navigator.storage.getDirectory().)
 
   // base64 string → ArrayBuffer — same shape as capacitor-shim:78
   function base64ToArrayBuffer(b64) {
@@ -117,13 +68,69 @@
 
   // ── store factory ────────────────────────────────────────────────────────
 
-  function makeStore(vaultId) {
+  // makeStore(vaultId, { getRoot }) — `getRoot` is a pluggable root-directory
+  // provider: `async ({ create }) => FileSystemDirectoryHandle`. Default (no
+  // getRoot passed) reproduces the exact OPFS layout used before this
+  // refactor — `navigator.storage.getDirectory()/vaults/<vaultId>` — so
+  // existing (OPFS) callers are unaffected. A `folder` vault (real
+  // directory picked via showDirectoryPicker) passes its own getRoot that
+  // returns the picked handle directly (no `/vaults/<id>` nesting — the
+  // handle itself IS the vault root).
+  function makeStore(vaultId, { getRoot } = {}) {
+    const getVaultRoot = getRoot || (async ({ create = false } = {}) => {
+      const root = await navigator.storage.getDirectory();
+      const vaults = await root.getDirectoryHandle('vaults', { create });
+      return vaults.getDirectoryHandle(vaultId, { create });
+    });
+
+    // Walk to the parent directory handle of `relPath`, returns {parent, name}.
+    // `create` applies to the vault root AND every intermediate segment —
+    // i.e. create:true auto-creates the whole ancestor chain (mkdir-on-write).
+    async function resolveParent(relPath, { create = false } = {}) {
+      const dir = await getVaultRoot({ create });
+      const parts = String(relPath).split('/').filter(Boolean);
+      const name = parts.pop();
+      let cur = dir;
+      for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
+      return { parent: cur, name };
+    }
+
+    // Walk to the directory handle AT `relPath` itself (used by readdir/stat-dir/
+    // rmdir-target/copy-dir-dest). Root ('' or '/') resolves to the vault root.
+    async function resolveDir(relPath, { create = false } = {}) {
+      let cur = await getVaultRoot({ create });
+      const parts = String(relPath || '').split('/').filter(Boolean);
+      for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
+      return cur;
+    }
+
+    // 'file' | 'directory' | null (root '' / '/' is always 'directory')
+    async function statKind(relPath) {
+      const normalized = String(relPath || '').replace(/^\/+|\/+$/g, '');
+      if (normalized === '') return 'directory';
+      try {
+        const { parent, name } = await resolveParent(normalized, { create: false });
+        try {
+          await parent.getFileHandle(name, { create: false });
+          return 'file';
+        } catch (_) {
+          try {
+            await parent.getDirectoryHandle(name, { create: false });
+            return 'directory';
+          } catch (__) {
+            return null;
+          }
+        }
+      } catch (_) {
+        return null;
+      }
+    }
 
     // low-level raw (ArrayBuffer) read/write, used internally by copy/rename
     // so they don't pay a redundant base64 round-trip.
     async function readFileRaw(relPath) {
       try {
-        const { parent, name } = await resolveParent(vaultId, relPath, { create: false });
+        const { parent, name } = await resolveParent(relPath, { create: false });
         const fh = await parent.getFileHandle(name, { create: false });
         const file = await fh.getFile();
         return await file.arrayBuffer();
@@ -133,7 +140,7 @@
     }
 
     async function writeFileRaw(relPath, arrayBuffer) {
-      const { parent, name } = await resolveParent(vaultId, relPath, { create: true });
+      const { parent, name } = await resolveParent(relPath, { create: true });
       const fh = await parent.getFileHandle(name, { create: true });
       const w = await fh.createWritable();
       try {
@@ -144,14 +151,14 @@
     }
 
     async function copyPath(fromPath, toPath) {
-      const kind = await statKind(vaultId, fromPath);
+      const kind = await statKind(fromPath);
       if (kind === null) throw capError('ENOENT', 'copy: source not found: ' + fromPath);
       if (kind === 'file') {
         const data = await readFileRaw(fromPath);
         await writeFileRaw(toPath, data);
       } else {
-        await resolveDir(vaultId, toPath, { create: true }); // ensure dest dir exists
-        const srcDir = await resolveDir(vaultId, fromPath, { create: false });
+        await resolveDir(toPath, { create: true }); // ensure dest dir exists
+        const srcDir = await resolveDir(fromPath, { create: false });
         for await (const [name, handle] of srcDir.entries()) {
           const childFrom = fromPath ? fromPath + '/' + name : name;
           const childTo = toPath ? toPath + '/' + name : name;
@@ -166,10 +173,10 @@
     }
 
     async function removePath(relPath) {
-      const kind = await statKind(vaultId, relPath);
+      const kind = await statKind(relPath);
       if (kind === null) throw capError('ENOENT', 'remove: not found: ' + relPath);
       try {
-        const { parent, name } = await resolveParent(vaultId, relPath, { create: false });
+        const { parent, name } = await resolveParent(relPath, { create: false });
         await parent.removeEntry(name, { recursive: kind === 'directory' });
       } catch (e) {
         rethrowAsEnoent(e, 'remove failed: ' + relPath);
@@ -181,7 +188,7 @@
       async readFile(opts) {
         const encoding = opts.encoding; // 'utf8' | undefined (binary = base64)
         try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
+          const { parent, name } = await resolveParent(opts.path, { create: false });
           const fh = await parent.getFileHandle(name, { create: false });
           const file = await fh.getFile();
           if (encoding) {
@@ -196,7 +203,7 @@
 
       async writeFile(opts) {
         const encoding = opts.encoding;
-        const { parent, name } = await resolveParent(vaultId, opts.path, { create: true });
+        const { parent, name } = await resolveParent(opts.path, { create: true });
         const fh = await parent.getFileHandle(name, { create: true });
         const w = await fh.createWritable();
         try {
@@ -215,7 +222,7 @@
       // for binary chunk writes. Creates the file (+ missing parents) if it
       // doesn't exist yet.
       async appendFile(opts) {
-        const { parent, name } = await resolveParent(vaultId, opts.path, { create: true });
+        const { parent, name } = await resolveParent(opts.path, { create: true });
         let existing = new Uint8Array(0);
         let fh;
         try {
@@ -240,7 +247,7 @@
 
       async deleteFile(opts) {
         try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
+          const { parent, name } = await resolveParent(opts.path, { create: false });
           await parent.removeEntry(name);
         } catch (e) {
           rethrowAsEnoent(e, 'deleteFile: not found: ' + opts.path);
@@ -249,7 +256,7 @@
       },
 
       async mkdir(opts) {
-        const dir = await vaultDir(vaultId, { create: true });
+        const dir = await getVaultRoot({ create: true });
         const parts = String(opts.path).split('/').filter(Boolean);
         let cur = dir;
         const lastIdx = parts.length - 1;
@@ -262,7 +269,7 @@
 
       async rmdir(opts) {
         try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
+          const { parent, name } = await resolveParent(opts.path, { create: false });
           await parent.removeEntry(name, { recursive: !!opts.recursive });
         } catch (e) {
           rethrowAsEnoent(e, 'rmdir failed: ' + opts.path);
@@ -272,7 +279,7 @@
 
       async readdir(opts) {
         try {
-          const dir = await resolveDir(vaultId, opts.path, { create: false });
+          const dir = await resolveDir(opts.path, { create: false });
           const files = [];
           for await (const [name, handle] of dir.entries()) {
             if (handle.kind === 'directory') {
@@ -294,7 +301,7 @@
           return { type: 'directory', size: 0, mtime: 0, ctime: 0, uri: '' };
         }
         try {
-          const { parent, name } = await resolveParent(vaultId, normalized, { create: false });
+          const { parent, name } = await resolveParent(normalized, { create: false });
           try {
             const fh = await parent.getFileHandle(name, { create: false });
             const f = await fh.getFile();
@@ -312,10 +319,10 @@
       // destination exists before removing the source so a failed copy
       // never loses data.
       async rename(opts) {
-        const kind = await statKind(vaultId, opts.from);
+        const kind = await statKind(opts.from);
         if (kind === null) throw capError('ENOENT', 'rename: source not found: ' + opts.from);
         await copyPath(opts.from, opts.to);
-        const destKind = await statKind(vaultId, opts.to);
+        const destKind = await statKind(opts.to);
         if (destKind === null) throw capError('EIO', 'rename: copy to destination failed: ' + opts.to);
         await removePath(opts.from);
         return {};
@@ -339,7 +346,7 @@
         const rel = String(opts.path || '').replace(/^\/+|\/+$/g, '');
         if (rel !== '') {
           try {
-            const { parent, name } = await resolveParent(vaultId, rel, { create: false });
+            const { parent, name } = await resolveParent(rel, { create: false });
             const fh = await parent.getFileHandle(name, { create: false });
             return { uri: URL.createObjectURL(await fh.getFile()) };
           } catch (_) {
@@ -347,7 +354,10 @@
             // (no throw, matching HttpFilesystem).
           }
         }
-        return { uri: 'opfs:/vaults/' + vaultId + (rel ? '/' + rel : '/') };
+        // Generic scheme (not 'opfs:/vaults/...') — this store also backs
+        // 'folder' vaults, which aren't nested under /vaults/<id> at all.
+        // Obsidian accepts any string here; only the label changes.
+        return { uri: 'ow-vault:/' + vaultId + (rel ? '/' + rel : '/') };
       },
 
       // No external file-system changes can happen to OPFS behind our back —
@@ -372,7 +382,7 @@
             }
           }
         }
-        const dir = await vaultDir(vaultId, { create: true });
+        const dir = await getVaultRoot({ create: true });
         await walk(dir, '');
         return { children };
       },
