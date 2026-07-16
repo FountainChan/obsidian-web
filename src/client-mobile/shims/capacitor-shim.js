@@ -560,16 +560,25 @@
     return wrapped;
   }
 
-  // ── Filesystem dispatcher (local ↔ server) ──────────────────────────────
+  // ── Filesystem dispatcher (local ↔ server ↔ folder) ──────────────────────
   // window.__owVaultType is set by boot.js (mobile) at call-time — evaluated
   // per-call, not once at load-time. boot.js runs AFTER this script (see
   // index.html loading order), so by the time Obsidian actually calls
   // Filesystem.readFile etc., boot.js has already set __owVaultType. See
   // docs/plans/opfs-wire.md §3 (Architecture diagram, "תובנת-מפתח").
+  //
+  // 'folder' vaults re-use the same OpfsStore as 'local' (OPFS) vaults — just
+  // with a pluggable getRoot that returns the picked FileSystemDirectoryHandle
+  // (window.__owFolderRoot, set by boot.js's permission-gated verify step)
+  // instead of navigator.storage.getDirectory()/vaults/<id>. See
+  // docs/plans/folder-vault.md §3ה.
   function fsBackend() {
-    if (window.__owVaultType === 'local') {
+    const t = window.__owVaultType;
+    if (t === 'local' || t === 'folder') {
       if (!window.__owLocalFs) {
-        window.__owLocalFs = wrapOpfsWithFullPath(window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId()));
+        const getRoot = t === 'folder' ? (async () => window.__owFolderRoot) : undefined;
+        window.__owLocalFs = wrapOpfsWithFullPath(
+          window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId(), { getRoot }));
       }
       return window.__owLocalFs;
     }

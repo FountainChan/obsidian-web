@@ -40,11 +40,14 @@ const MOBILE_SCRIPTS = [
   var params  = new URLSearchParams(location.search);
   var VAULT_ID = params.get('vault') || localStorage.getItem('obsidian-web:lastVaultId') || '';
 
-  // Vault type: 'local' (OPFS, no server round-trip) or 'server' (HTTP
-  // /api/fs). Determined by presence in the browser-side local vault
-  // registry (window.__owLocalVaults, loaded synchronously via <script>
-  // before boot.js — see index.html loading order).
-  var VAULT_TYPE = (window.__owLocalVaults && window.__owLocalVaults.has(VAULT_ID)) ? 'local' : 'server';
+  // Vault type: 'local' (OPFS, no server round-trip), 'folder' (real
+  // directory picked via showDirectoryPicker, also OPFS-store-backed — see
+  // capacitor-shim's fsBackend), or 'server' (HTTP /api/fs). Determined by
+  // the browser-side local vault registry's `type` field (window.__owLocalVaults,
+  // loaded synchronously via <script> before boot.js — see index.html loading
+  // order). No entry in the registry → 'server' (unchanged from before).
+  var __owV = window.__owLocalVaults && window.__owLocalVaults.get(VAULT_ID);
+  var VAULT_TYPE = __owV ? (__owV.type || 'local') : 'server';   // 'folder' | 'local' | 'server'
   window.__owVaultType = VAULT_TYPE;
   window.__owVaultId   = VAULT_ID;
   console.log('[obsidian-web] vault type:', VAULT_TYPE, 'id:', VAULT_ID);
@@ -221,10 +224,41 @@ const MOBILE_SCRIPTS = [
     if (statusEl) statusEl.textContent = text;
   }
 
+  // folder vaults need a re-grant click (user gesture) whenever
+  // queryPermission comes back != 'granted' (typically: every fresh reload —
+  // browsers don't persist FS Access permissions across sessions outside
+  // installed PWAs, brief §9 Q2/v2). Renders a button inside the existing
+  // #ow-loading overlay; resolves with the requestPermission() result.
+  function showGrantScreen(handle) {
+    return new Promise(function (resolve) {
+      var overlay = document.getElementById('ow-loading');
+      setStatus('Access to "' + handle.name + '" is needed to continue.');
+      var btn = document.createElement('button');
+      btn.textContent = 'Grant access to ' + handle.name;
+      btn.style.cssText = 'margin-top:8px;padding:8px 16px;background:#7f6df2;color:#fff;' +
+        'border:none;border-radius:4px;cursor:pointer;font:13px -apple-system,BlinkMacSystemFont,sans-serif;';
+      btn.onclick = async function () {
+        btn.disabled = true;
+        btn.textContent = 'Requesting…';
+        var perm;
+        try {
+          perm = await handle.requestPermission({ mode: 'readwrite' });
+        } catch (e) {
+          perm = 'denied';
+        }
+        if (btn.parentNode) btn.parentNode.removeChild(btn);
+        resolve(perm);
+      };
+      (overlay || document.body).appendChild(btn);
+    });
+  }
+
   setStatus('Verifying vault...');
 
   // אמת שה-vault קיים: local → OPFS getDirectoryHandle (idempotent, אין
-  // bootstrap בשרת ל-local); server → HTTP stat על ה-root (כמו קודם).
+  // bootstrap בשרת ל-local); folder → שחזור handle מ-IndexedDB + permission
+  // gate (queryPermission → showGrantScreen אם צריך); server → HTTP stat על
+  // ה-root (כמו קודם).
   var verifyPromise;
   if (VAULT_TYPE === 'local') {
     verifyPromise = (async function () {
@@ -232,6 +266,18 @@ const MOBILE_SCRIPTS = [
       var root = await navigator.storage.getDirectory();
       var vaults = await root.getDirectoryHandle('vaults', { create: true });
       await vaults.getDirectoryHandle(VAULT_ID, { create: true });   // idempotent
+      return { isDirectory: true };
+    })();
+  } else if (VAULT_TYPE === 'folder') {
+    verifyPromise = (async function () {
+      if (!window.__owOpfsStore) throw new Error('OPFS store not loaded');
+      if (!window.__owFolderHandles) throw new Error('folder handle store not loaded');
+      var h = await window.__owFolderHandles.loadHandle(VAULT_ID);
+      if (!h) throw new Error('folder handle missing — re-open the folder');
+      var perm = await h.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') perm = await showGrantScreen(h);   // נתיב ראשי: כפתור → requestPermission (gesture)
+      if (perm !== 'granted') throw new Error('Access not granted');
+      window.__owFolderRoot = h;                                 // רק אחרי granted
       return { isDirectory: true };
     })();
   } else {
@@ -246,11 +292,13 @@ const MOBILE_SCRIPTS = [
     .then(async function(stat) {
       if (!stat || (!stat.isDirectory && stat.type !== 'directory')) throw new Error('Vault path is not a directory');
 
-      // seed system plugins ל-OPFS לפני טעינת Obsidian (כדי ש-community-plugins.json
-      // יהיה מוכן כש-Obsidian קורא אותו) — local (OPFS) vaults בלבד. לא חוסם את
-      // הפתיחה אם נכשל (retry ב-boot הבא דרך ה-version-gate).
-      if (VAULT_TYPE === 'local' && window.__owOpfsStore && window.__owSeedSystemPlugins) {
-        try { await window.__owSeedSystemPlugins.seedSystemPlugins(window.__owOpfsStore.makeStore(VAULT_ID)); }
+      // seed system plugins ל-OPFS/folder לפני טעינת Obsidian (כדי ש-
+      // community-plugins.json יהיה מוכן כש-Obsidian קורא אותו) — local
+      // (OPFS) ו-folder vaults (לא server, שמקבל אותם דרך overlay צד-שרת
+      // קיים). לא חוסם את הפתיחה אם נכשל (retry ב-boot הבא דרך ה-version-gate).
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedSystemPlugins) {
+        var gr = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
+        try { await window.__owSeedSystemPlugins.seedSystemPlugins(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr })); }
         catch (e) { console.warn('[ow] seed system plugins failed', e); }
       }
 
