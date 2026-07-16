@@ -1,43 +1,55 @@
-# obsidian-web — Cloudflare deployment (browser file system / OPFS)
+# obsidian-web — Cloudflare deployment (mobile runtime, browser file system / OPFS)
 
-**Client-only.** Vaults live entirely in the browser via **OPFS** (Origin Private
-File System). There is **no server-side vault storage** — the previous Durable
-Object (`VaultDO`, server-backed vault) has been **removed** on this branch.
+**Client-only, mobile runtime.** Serves `src/client-mobile/` + `vendor/obsidian-mobile/`
+(not the desktop client/renderer). Vaults live entirely in the browser via **OPFS**
+(Origin Private File System). There is **no server-side vault storage** — the
+previous Durable Object (`VaultDO`, server-backed vault) has been **removed**.
 
 ## What the Worker does now
 - Serves the **static app bundle** only (`env.ASSETS`). See `index.js`.
-- The vault, its files, and all FS ops happen **in the browser** (OpfsStore engine).
+- `/` renders **Obsidian's native mobile onboarding screen** ("Create a vault" /
+  "Use my existing vault") — no demo vault is injected, the vault chooser starts
+  empty. Vault creation/writes/reads happen **entirely client-side** (OpfsStore
+  engine); 0 dependency on `/api/*`.
+- `vendor/obsidian-mobile/` is self-contained (own `app.js`/`worker.js`/`i18n`/
+  `lib`) — `build-assets.sh` copies it (and mirrors its resource dirs at the
+  bundle root) without touching `vendor/obsidian` (desktop).
 
 ## Example / demo vault content — **KEEP** (`template.js`)
 `template.js` holds the **demo vault** — 11 example files (`Welcome.md`,
-`How It Works.md`, `Features/*.md`, `.obsidian/*` config) plus community plugins
-(from `plugins-generated.js`, built by `build-assets.sh`). It **used to** load into
-the removed Durable Object. It is **intentionally kept** as the demo/example content.
-
-**Its new role (follow-up):** on the browser-FS deployment these example files are
-**seeded into OPFS on first visit** (a fresh visitor lands in a demo vault with the
-example content, then adds their own files client-side — nothing touches the server).
-This replaces the old DO-preload. Wiring: a small client seed that writes
-`TEMPLATE_FILES` into the OPFS vault when it's empty (mirrors `seedSystemPlugins`).
-Do **not** delete `template.js`.
+`How It Works.md`, `Features/*.md`, `.obsidian/*` config). It is **intentionally
+kept**, unused by this slice — role: seeded into OPFS on first visit so a fresh
+visitor lands in a populated vault instead of the empty native chooser. **Not
+wired yet** — follow-up, see below. Do **not** delete `template.js`.
 
 ## What's included (finished)
-- OPFS vault engine (create local vault, notes, nested folders — all client-side).
-- Layout-switcher system plugin (seeded to OPFS).
-- Community-plugin download proxy + LiveSync-as-community-plugin — **on the Node
-  server**. These are **server-side** features (`src/server/api/proxy.js`,
-  `system-plugin-files.js`) and are **not yet ported** to the Worker.
+- OPFS vault engine on the mobile runtime (create local vault, notes, nested
+  folders, reload-persistence — all client-side, verified static/no-server).
+- Native mobile onboarding/vault-chooser screen renders fully at `/`.
 
-## Follow-ups (add later — "the other options")
-1. **Port `/api/proxy-request`** (community-plugin downloads: follow-redirects,
-   allow-list + SSRF guard, cache) to a Worker route → community plugins +
-   LiveSync install work on the static edge deployment.
-2. **Port `/api/system-plugins` + `/api/system-plugin-file`** (system-plugin seed)
-   to Worker routes. Set `SYSTEM_PLUGINS_SEED_DISABLED=obsidian-livesync` so CF
-   pre-installs LiveSync **disabled**.
-3. **Seed the example vault** (`template.js` → `TEMPLATE_FILES`) into OPFS on first
-   visit, so the demo lands in a populated vault (see "Example / demo vault content").
-4. Folder-vault (File System Access API) + native-style vault chooser.
+## Known gaps (follow-ups)
+1. **Seed the example vault** (`template.js` → OPFS) on first visit — **slice
+   `cf-mobile-seed`**, not this slice.
+2. **Seed system plugins** (layout-switcher etc.) to OPFS on static deploys —
+   also `cf-mobile-seed` (mirrors `seedSystemPlugins`, currently fails soft
+   without `/api/system-plugins`).
+3. **Port `/api/proxy-request`** (community-plugin downloads) to a Worker route
+   — later follow-up, community-plugin install doesn't work yet on static edge.
+4. Native "**Create a vault**" button (mobile onboarding UI) calls
+   `Filesystem.mkdir()` before `window.__owVaultType` is updated from the
+   boot-time default (`'server'`) — the call is routed to `/api/fs/mkdir`,
+   which doesn't exist here, so it always fails with "mkdir failed: ...". This
+   is a `src/client-mobile/**` bug, out of scope for this deployment-only
+   slice (verified: same failure on the local dev server, not CF-specific).
+   Local (OPFS) vaults can still be created via `window.__owLocalVaults.create()`
+   + navigating to `/?vault=<id>` (what `new-local.html` does — its own
+   hardcoded `/mobile?vault=` link doesn't resolve on this static deployment
+   though, since there is no `/mobile` route here — only `/`).
+5. Two font files referenced by `obsidian-mobile/app.css` ("Inter",
+   `public/fonts/*.woff2`) 404 — `vendor/obsidian-mobile` never included a
+   `public/` dir. Cosmetic only (`font-display: swap` → system font fallback);
+   does not block rendering. Not a `vendor/obsidian` dependency (path is under
+   `/obsidian-mobile/` already) — just an incomplete upstream extraction.
 
 ## Deploy
 ```
