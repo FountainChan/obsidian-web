@@ -11,7 +11,39 @@
 // Run: bun test src/deployments/cloudflare/test/proxy-worker.test.js
 
 import { expect, test, describe } from 'bun:test';
-import { handleProxy, isAllowed, bytesToB64, b64ToBytes } from '../proxy-worker.js';
+import { handleProxy, isAllowed, isCacheableHost, bytesToB64, b64ToBytes } from '../proxy-worker.js';
+
+// ── caches.default mock (DoD#4) ──────────────────────────────────────────────
+// Bun has no global `caches` (that's a Worker/Service-Worker runtime API) —
+// brief §0 explicitly allows mocking it: "caches.default (Map עם match/put)".
+// This mirrors the real Cache API contract handleProxy relies on: match(req)
+// → Response|undefined, put(req, res) → void. Keyed by request URL, same as
+// the real Cache API keys by the Request's URL.
+function makeMockCaches() {
+  const store = new Map();
+  return {
+    default: {
+      async match(req) {
+        const key = typeof req === 'string' ? req : req.url;
+        const hit = store.get(key);
+        return hit ? hit.clone() : undefined;
+      },
+      async put(req, res) {
+        const key = typeof req === 'string' ? req : req.url;
+        store.set(key, res.clone());
+      },
+    },
+  };
+}
+
+// handleProxy always references the global `caches.default` (real Worker
+// runtime semantics — it's not passed in as a parameter). Install a base
+// mock for the whole file so tests that happen to hit a cacheable host
+// (e.g. DoD#1's raw.githubusercontent.com manifest) don't crash on
+// `ReferenceError: caches is not defined`. The dedicated Cache API tests
+// below swap in their own fresh, isolated instance so cache hits/misses are
+// deterministic regardless of test order.
+globalThis.caches = makeMockCaches();
 
 // Minimal ctx stub — handleProxy calls ctx.waitUntil() when caching (Commit 1
 // onward); Commit 0 doesn't cache, but keep the stub future-proof.
@@ -201,4 +233,88 @@ describe('handleProxy — real network', () => {
     const res = await handleProxy(req, makeCtx());
     expect(res.status).toBe(400);
   });
+});
+
+// ── isCacheableHost unit (§9 Q1 decision: only immutable-content hosts) ─────
+
+describe('isCacheableHost', () => {
+  test('immutable-content hosts are cacheable', () => {
+    expect(isCacheableHost('https://raw.githubusercontent.com/x')).toBe(true);
+    expect(isCacheableHost('https://releases.obsidian.md/x')).toBe(true);
+    expect(isCacheableHost('https://release-assets.githubusercontent.com/x')).toBe(true);
+  });
+
+  test('api.github.com (mutable lists) is NOT cacheable — §9 Q1', () => {
+    expect(isCacheableHost('https://api.github.com/repos/x/y/releases')).toBe(false);
+  });
+
+  test('non-allow-listed / malformed → false', () => {
+    expect(isCacheableHost('https://evil.com/x')).toBe(false);
+    expect(isCacheableHost('not a url')).toBe(false);
+  });
+});
+
+// ── DoD#4 — Cache API (caches.default mock) ─────────────────────────────────
+
+describe('handleProxy — Cache API (DoD#4)', () => {
+  test('second GET to a cacheable host → x-ow-cache:hit, no second network fetch', async () => {
+    const realCaches = globalThis.caches;
+    const realFetch = globalThis.fetch;
+    globalThis.caches = makeMockCaches();
+    let fetchCalls = 0;
+    globalThis.fetch = async (...args) => {
+      fetchCalls++;
+      return realFetch(...args);
+    };
+    try {
+      const url = 'https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json';
+
+      // First call: real network fetch, cache miss, response cached via
+      // ctx.waitUntil (must await it — that's how the Worker runtime keeps
+      // the cache write alive past the response, and how we observe it here).
+      const ctx1 = makeCtx();
+      const res1 = await handleProxy(postRequest({ url, method: 'GET' }), ctx1);
+      expect(res1.status).toBe(200);
+      expect(res1.headers.get('x-ow-cache')).not.toBe('hit');
+      await Promise.all(ctx1.waited);
+      expect(fetchCalls).toBe(1);
+
+      // Second call, same URL: must come from cache — no second network
+      // fetch, and the hit marker is set.
+      const ctx2 = makeCtx();
+      const res2 = await handleProxy(postRequest({ url, method: 'GET' }), ctx2);
+      expect(res2.headers.get('x-ow-cache')).toBe('hit');
+      expect(fetchCalls).toBe(1); // unchanged — no second fetch() call
+    } finally {
+      globalThis.caches = realCaches;
+      globalThis.fetch = realFetch;
+    }
+  }, 20000);
+
+  test('non-cacheable host (api.github.com) is never cached — always a fresh fetch', async () => {
+    const realCaches = globalThis.caches;
+    const realFetch = globalThis.fetch;
+    globalThis.caches = makeMockCaches();
+    let fetchCalls = 0;
+    globalThis.fetch = async (...args) => {
+      fetchCalls++;
+      return realFetch(...args);
+    };
+    try {
+      const url = 'https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest';
+      const ctx1 = makeCtx();
+      const res1 = await handleProxy(postRequest({ url, method: 'GET' }), ctx1);
+      expect(res1.status).toBe(200);
+      await Promise.all(ctx1.waited);
+      expect(fetchCalls).toBe(1);
+
+      const ctx2 = makeCtx();
+      const res2 = await handleProxy(postRequest({ url, method: 'GET' }), ctx2);
+      expect(res2.headers.get('x-ow-cache')).not.toBe('hit');
+      expect(fetchCalls).toBe(2); // fetched again — api.github.com is excluded from caching
+    } finally {
+      globalThis.caches = realCaches;
+      globalThis.fetch = realFetch;
+    }
+  }, 20000);
 });

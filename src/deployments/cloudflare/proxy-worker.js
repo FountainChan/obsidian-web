@@ -13,10 +13,14 @@
 // Same allow-list + SSRF guard + redirect handling as the Node proxy — see
 // src/server/api/proxy.js for the reference implementation this was ported
 // from. Differences are Worker-runtime constraints only (no Buffer/Node http,
-// manual redirect handling via fetch({redirect:'manual'})).
+// manual redirect handling via fetch({redirect:'manual'}), Cache API instead
+// of an in-process cache).
 //
-// Cache API (caches.default) for immutable downloads is added in a follow-up
-// commit — see isCacheableHost/CACHEABLE_HOSTS below (not present yet here).
+// Cache API note (brief finding 3 / §9 Q0): caches.default is a no-op on
+// *.workers.dev (documented CF limitation) — it's only active on a
+// custom-domain/route. Functional either way; caching is purely an
+// optimization. See README for the routes/wrangler.toml uncomment needed in
+// prod to get cache hits.
 
 // Simple allow-list of hostnames we are willing to proxy. Keeps this from
 // becoming an open proxy.
@@ -76,6 +80,23 @@ function json(obj, status = 200) {
   });
 }
 
+// Hosts we cache GET responses for — immutable content only (raw file /
+// release-asset downloads). Deliberately excludes api.github.com: community
+// plugin/theme list responses from that host change over time, and caching
+// them would serve stale plugin listings (brief §9 Q1).
+const CACHEABLE_HOSTS = new Set(['raw.githubusercontent.com', 'releases.obsidian.md']);
+
+export function isCacheableHost(urlStr) {
+  try {
+    const { hostname } = new URL(urlStr);
+    if (CACHEABLE_HOSTS.has(hostname)) return true;
+    if (hostname.endsWith('.githubusercontent.com')) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 export async function handleProxy(request, ctx) {
   let payload;
   try {
@@ -87,6 +108,19 @@ export async function handleProxy(request, ctx) {
 
   if (!url || typeof url !== 'string') return json({ error: 'url required' }, 400);
   if (!isAllowed(url)) return json({ error: 'host not allowed' }, 403);
+
+  // Cache: only GET, and only for immutable-content hosts (finding 3 / §9 Q1).
+  // Cache key is the outbound URL itself, as a plain GET Request.
+  const cacheable = (method === 'GET' || !method) && isCacheableHost(url);
+  const cacheKey = new Request(url, { method: 'GET' });
+  if (cacheable) {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) {
+      const out = new Response(hit.body, hit);
+      out.headers.set('x-ow-cache', 'hit');
+      return out;
+    }
+  }
 
   let resp;
   try {
@@ -136,5 +170,13 @@ export async function handleProxy(request, ctx) {
     headers: outHeaders,
     body: bytesToB64(buf),
   });
-  return new Response(responsePayload, { headers: { 'Content-Type': 'application/json' } });
+  const out = new Response(responsePayload, { headers: { 'Content-Type': 'application/json' } });
+
+  if (cacheable && resp.status === 200) {
+    const toCache = out.clone();
+    toCache.headers.set('Cache-Control', 'public, max-age=86400');
+    ctx.waitUntil(caches.default.put(cacheKey, toCache));
+  }
+
+  return out;
 }
