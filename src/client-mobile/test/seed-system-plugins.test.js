@@ -179,3 +179,69 @@ test('seedSystemPlugins is a no-op when /api/system-plugins is unreachable', asy
   await assert.doesNotReject(seedSystemPlugins(store));
   assert.equal(store.files.size, 0);
 });
+
+// ── static fallback (CF: אין /api/system-plugins → /system-plugins/manifest.json) ──
+// docs/plans/cf-mobile-seed.md §3ב — fallback רק כש-/api/system-plugins מחזיר
+// 404/null; שאר הלוגיקה (version-gate, allOk, merge) זהה, רק ה-URL של הקובץ.
+function makeFakeStaticFetch({ manifest, fileContents }) {
+  const calls = [];
+  return {
+    calls,
+    fetch: async function fakeStaticFetch(url) {
+      calls.push(url);
+      if (url === '/api/system-plugins') return { ok: false, status: 404 };   // CF static: אין /api
+      if (url === '/system-plugins/manifest.json') return { ok: true, json: async () => manifest };
+      const m = /^\/system-plugins\/([^/]+)\/(.+)$/.exec(url);
+      if (m) {
+        const id = m[1];
+        const file = decodeURIComponent(m[2]);
+        const key = id + '/' + file;
+        const text = fileContents[key];
+        if (text === undefined) return { ok: false };
+        return { ok: true, arrayBuffer: async () => new TextEncoder().encode(text).buffer };
+      }
+      return { ok: false };
+    },
+  };
+}
+
+test('seedSystemPlugins falls back to /system-plugins/manifest.json when /api/system-plugins 404s (CF static)', async (t) => {
+  const manifest = { plugins: [{ id: 'obsidian-web-layout', version: '0.1.0', files: ['manifest.json', 'main.js'] }] };
+  const fileContents = {
+    'obsidian-web-layout/manifest.json': '{"id":"obsidian-web-layout"}',
+    'obsidian-web-layout/main.js': '// layout switcher',
+  };
+  const fake = makeFakeStaticFetch({ manifest, fileContents });
+  const origFetch = global.fetch;
+  global.fetch = fake.fetch;
+  t.after(() => { global.fetch = origFetch; });
+
+  const store = makeFakeStore();
+  await seedSystemPlugins(store);
+
+  assert.equal(store.files.get('.obsidian/plugins/obsidian-web-layout/manifest.json'), fileContents['obsidian-web-layout/manifest.json']);
+  assert.equal(store.files.get('.obsidian/plugins/obsidian-web-layout/main.js'), fileContents['obsidian-web-layout/main.js']);
+  assert.equal(store.files.get('.obsidian/plugins/obsidian-web-layout/.ow-seeded-version'), '0.1.0');
+
+  const community = JSON.parse(store.files.get('.obsidian/community-plugins.json'));
+  assert.deepEqual(community, ['obsidian-web-layout']);
+
+  // ודא שהשתמש בנתיב הסטטי (לא /api/system-plugin-file) — finding 2: encodeURIComponent
+  assert.ok(fake.calls.includes('/system-plugins/obsidian-web-layout/manifest.json'));
+  assert.ok(fake.calls.includes('/system-plugins/obsidian-web-layout/main.js'));
+  assert.ok(!fake.calls.some((u) => u.startsWith('/api/system-plugin-file')));
+});
+
+test('seedSystemPlugins does not use static fallback when /api/system-plugins succeeds (local server — no regression)', async (t) => {
+  const manifest = { plugins: [{ id: 'obsidian-web-layout', version: '0.1.0', files: ['main.js'] }] };
+  const fileContents = { 'obsidian-web-layout/main.js': 'J' };
+  const fake = makeFakeFetch({ manifest, fileContents });
+  const origFetch = global.fetch;
+  global.fetch = fake.fetch;
+  t.after(() => { global.fetch = origFetch; });
+
+  const store = makeFakeStore();
+  await seedSystemPlugins(store);
+
+  assert.ok(!fake.calls.some((u) => u.startsWith('/system-plugins/')), 'static fallback not consulted when /api succeeds');
+});
