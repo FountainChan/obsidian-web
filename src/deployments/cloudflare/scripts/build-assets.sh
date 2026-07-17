@@ -75,6 +75,16 @@ BUST=$(date +%s)
 echo "  cache buster: $BUST"
 sed -i "s|/client-mobile/\([^\"]*\)?v=[^\"&]*\"|/client-mobile/\1?v=${BUST}\"|g" "$PUBLIC_DIR/index.html"
 
+# ── Service Worker (offline + asset-cache — docs/plans/service-worker-offline.md
+# §3ד) — copied to the public root so its scope covers the whole app. BUST is
+# the same timestamp already used for ?v= above, so a new deploy = a new SW
+# cache (CACHE='ow-sw-'+BUILD_ID inside sw.js). Note: sw.js is served from the
+# root, not under /client-mobile/, so the sed above (which only targets
+# /client-mobile/...?v= tags in index.html) does not touch it.
+echo "  installing sw.js (BUILD_ID=${BUST})..."
+cp "$MAIN_DIR/src/client-mobile/sw.js" "$PUBLIC_DIR/sw.js"
+sed -i "s/__OW_BUILD__/${BUST}/g" "$PUBLIC_DIR/sw.js"   # BUST = ה-timestamp שכבר משמש ל-?v=
+
 # ── system plugins (layout-switcher + LiveSync) → static (docs/plans/cf-mobile-seed.md §3א, cf-preinstall-livesync §3) ──
 # CF static hosting has no /api/system-plugins — seed-system-plugins.js falls
 # back to fetching these static files when the API route 404s.

@@ -131,6 +131,27 @@ function createApp(appConfig = {}) {
     });
   }
 
+  // Service Worker (offline + asset-cache — docs/plans/service-worker-offline.md
+  // §3ג) — served from the root so its scope covers the whole app
+  // (Service-Worker-Allowed:/). __OW_BUILD__ is replaced with the same
+  // cache-bust value used for ?v=<bust> on script tags, so a code change
+  // (new mtime hash) produces a new SW cache automatically. no-cache on the
+  // SW response itself — otherwise the browser could pin an old SW.
+  app.get('/sw.js', async (req, res) => {
+    try {
+      const raw = await fsp.readFile(path.join(appConfig.clientMobilePath, 'sw.js'), 'utf8');
+      const src = raw.replace(/__OW_BUILD__/g, cacheBust);
+      res.set({
+        'Content-Type': 'application/javascript',
+        'Cache-Control': 'no-cache',
+        'Service-Worker-Allowed': '/',
+      });
+      res.send(src);
+    } catch (e) {
+      res.status(500).send('// sw unavailable');
+    }
+  });
+
   // API routes.
   app.use('/api/bootstrap', createBootstrapRouter(vaultRegistry, appConfig.vaultPath, appConfig.bootstrap));
   app.use('/api/proxy-request', createProxyRouter());
