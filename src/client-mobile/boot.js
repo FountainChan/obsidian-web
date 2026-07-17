@@ -638,7 +638,12 @@ const MOBILE_SCRIPTS = [
           var sel = e.target && e.target.closest ? e.target.closest('select') : null;
           if (!sel) return;
           var opts = Array.prototype.slice.call(sel.options);
-          if (opts.some(function (o) { return o.value === 'manage-vaults'; }) && opts.length <= 1) {
+          // כל select עם 'manage-vaults' → openVaultChooser. (הוסר guard opts.length<=1:
+          // כשה-vault זרוע-תוכן, Bte()/readdir מוסיף תת-ספריות כ"vaults" מדומים
+          // — למשל 'Features' — אז length>1, אבל אלה אינם vaults אמיתיים ניתנים-למעבר.
+          // מעבר-vault אמיתי קורה במסך-הפתיחה; לכן תמיד → chooser. תוקן אחרי שהבאג
+          // צף על ה-demo החי (vault זרוע), בעוד calev בדק vault ריק (length 1).)
+          if (opts.some(function (o) { return o.value === 'manage-vaults'; })) {
             e.preventDefault(); e.stopImmediatePropagation();   // מנסה לדכא את ה-native picker
             if (window.app && typeof window.app.openVaultChooser === 'function') {
               window.app.openVaultChooser();   // אומת: removeItem('mobile-selected-vault')+reload(500ms)→chooser
