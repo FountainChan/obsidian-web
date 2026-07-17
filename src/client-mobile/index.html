@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <!-- Path-based routing (docs/plans/url-routing.md §3א): worker.js ב-vendor
+       bundle נטען עם URL יחסי ("worker.js") — תחת /vault/<id> ה-document base
+       הוא /vault/, אז ללא <base> זה יפתור ל-/vault/worker.js → 404 → האינדקסר
+       מת. <base href="/"> מיישב את כל ה-URLs היחסיים מול השורש בכל path. -->
+  <base href="/">
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
   <title>Obsidian Web</title>

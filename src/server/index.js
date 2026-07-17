@@ -86,12 +86,13 @@ function createApp(appConfig = {}) {
     sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
-  // /starter no longer serves the desktop starter shell (removed along with
-  // src/client). Redirect (not 404) because src/client-mobile/boot.js:610/617
-  // still navigate to /starter on vault-switcher click and error recovery —
-  // the redirect lands them back on the native mobile screen at /.
-  app.get(['/starter', '/starter.html'], (req, res) => {
-    res.redirect(302, '/');
+  // Path-based routing (docs/plans/url-routing.md §3ג): /starter is the
+  // chooser/onboarding route (ignores auto-resume) and /vault/:id is an
+  // open, shareable vault URL. Both serve the same shell as / — boot.js
+  // reads location.pathname to decide what to render. Not a redirect: the
+  // id must stay visible/bookmarkable in the browser URL.
+  app.get(['/starter', '/starter.html', '/vault/:id'], (req, res) => {
+    sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
   // Static files.

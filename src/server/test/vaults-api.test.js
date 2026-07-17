@@ -264,21 +264,49 @@ test('remove returns 404 when vault is not in registry', async (t) => {
   assert.equal(body.ok, false);
 });
 
-test('starter route redirects to the mobile entry point', async (t) => {
+test('starter route serves the mobile shell (not a redirect)', async (t) => {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'obsidian-web-'));
   t.after(() => fsp.rm(tmp, { recursive: true, force: true }));
 
+  const clientMobilePath = path.join(tmp, 'client-mobile');
+  await fsp.mkdir(clientMobilePath);
+  await fsp.writeFile(path.join(clientMobilePath, 'index.html'), '<html><body>shell</body></html>');
+
   const server = await startTestServer({
-    clientMobilePath: path.join(tmp, 'client-mobile'),
+    clientMobilePath,
     obsidianPath: path.join(tmp, 'obsidian'),
     registryPath: path.join(tmp, 'vaults.json'),
     vaultPath: tmp,
   });
   t.after(server.close);
 
-  // redirect: 'manual' — otherwise fetch/undici follows the 302 to / and
-  // returns a 200, which would make this assertion meaningless.
+  // path-based routing (docs/plans/url-routing.md §3ג): /starter now serves
+  // the shell directly (200), not a 302 — the chooser/onboarding decision is
+  // made client-side by boot.js reading location.pathname.
   const response = await fetch(server.baseUrl + '/starter', { redirect: 'manual' });
-  assert.equal(response.status, 302);
-  assert.equal(response.headers.get('location'), '/');
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /shell/);
+});
+
+test('vault/:id route serves the mobile shell with the id visible in the URL', async (t) => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'obsidian-web-'));
+  t.after(() => fsp.rm(tmp, { recursive: true, force: true }));
+
+  const clientMobilePath = path.join(tmp, 'client-mobile');
+  await fsp.mkdir(clientMobilePath);
+  await fsp.writeFile(path.join(clientMobilePath, 'index.html'), '<html><body>shell</body></html>');
+
+  const server = await startTestServer({
+    clientMobilePath,
+    obsidianPath: path.join(tmp, 'obsidian'),
+    registryPath: path.join(tmp, 'vaults.json'),
+    vaultPath: tmp,
+  });
+  t.after(server.close);
+
+  const response = await fetch(server.baseUrl + '/vault/abc123', { redirect: 'manual' });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /shell/);
 });
