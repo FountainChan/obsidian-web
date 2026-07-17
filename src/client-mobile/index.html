@@ -31,6 +31,11 @@
     <div class="ow-status" id="ow-status"></div>
   </div>
 
+  <!-- -1. רישום Service Worker (offline + asset-cache) — non-blocking, נטען
+       מוקדם אבל רק מתחיל לפעול אחרי window 'load' (לא מעכב boot).
+       ראה docs/plans/service-worker-offline.md §3ב. -->
+  <script src="/client-mobile/register-sw.js?v=1"></script>
+
   <!-- 0. Local vault registry + OPFS store — חייבים להיטען לפני capacitor-shim
        כדי ש-window.__owLocalVaults / window.__owOpfsStore יהיו קיימים כשה-
        Filesystem Proxy (בתוך capacitor-shim) נבנה, וכש-boot.js (בהמשך) קובע
