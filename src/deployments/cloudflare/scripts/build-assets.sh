@@ -75,16 +75,39 @@ BUST=$(date +%s)
 echo "  cache buster: $BUST"
 sed -i "s|/client-mobile/\([^\"]*\)?v=[^\"&]*\"|/client-mobile/\1?v=${BUST}\"|g" "$PUBLIC_DIR/index.html"
 
-# ── system plugins (layout-switcher) → static (docs/plans/cf-mobile-seed.md §3א) ──
+# ── system plugins (layout-switcher + LiveSync) → static (docs/plans/cf-mobile-seed.md §3א, cf-preinstall-livesync §3) ──
 # CF static hosting has no /api/system-plugins — seed-system-plugins.js falls
 # back to fetching these static files when the API route 404s.
 echo "  building system-plugins/ (static)..."
+
+# system-plugins/ — layout-switcher (קיים) + LiveSync (חדש, מותקן-מכובה)
 mkdir -p "$PUBLIC_DIR/system-plugins/obsidian-web-layout"
 cp "$MAIN_DIR/src/plugins/obsidian-web-layout/"* "$PUBLIC_DIR/system-plugins/obsidian-web-layout/"
-VER=$(node -p "require('$MAIN_DIR/src/plugins/obsidian-web-layout/manifest.json').version")
-cat > "$PUBLIC_DIR/system-plugins/manifest.json" <<EOF
-{"plugins":[{"id":"obsidian-web-layout","version":"$VER","files":["main.js","manifest.json"],"enabled":true}]}
-EOF
+LAYOUT_VER=$(node -p "require('$MAIN_DIR/src/plugins/obsidian-web-layout/manifest.json').version")
+
+# LiveSync — מותקן-מכובה. finding 1: `if node ...; then` בולע exit(1) → set -e לא מפיל.
+LS_PIN="${SEED_LIVESYNC_VERSION:-}"      # ריק=latest; נעילת-גרסה אופציונלית
+LS_VERSION=""; LS_FILES=""              # finding 3: init לפני set -u
+if node "$MAIN_DIR/scripts/install-livesync.js" ${LS_PIN:+--version "$LS_PIN"}; then
+  LS_SRC="$MAIN_DIR/vendor/plugins/obsidian-livesync"
+  if [[ -f "$LS_SRC/main.js" && -f "$LS_SRC/manifest.json" ]]; then
+    DEST="$PUBLIC_DIR/system-plugins/obsidian-livesync"; mkdir -p "$DEST"
+    cp "$LS_SRC/main.js" "$LS_SRC/manifest.json" "$DEST/"          # finding 4: מפורש, לא *.json (מדלג data.json)
+    LS_FILES='["main.js","manifest.json"]'
+    if [[ -f "$LS_SRC/styles.css" ]]; then cp "$LS_SRC/styles.css" "$DEST/"; LS_FILES='["main.js","manifest.json","styles.css"]'; fi
+    LS_VERSION=$(node -p "require('$LS_SRC/manifest.json').version")
+  fi
+else
+  echo "  WARN: obsidian-livesync download failed — skipping preinstall (build continues, layout-switcher only)"
+fi
+
+# manifest.json — finding 2: env מיוצא inline לפני node -e (אחרת process.env undefined → abort)
+LAYOUT_VER="$LAYOUT_VER" LS_VERSION="$LS_VERSION" LS_FILES="$LS_FILES" OUT="$PUBLIC_DIR/system-plugins/manifest.json" node -e '
+  const fs=require("fs");
+  const plugins=[{id:"obsidian-web-layout",version:process.env.LAYOUT_VER,files:["main.js","manifest.json"],enabled:true}];
+  if (process.env.LS_VERSION) plugins.push({id:"obsidian-livesync",version:process.env.LS_VERSION,files:JSON.parse(process.env.LS_FILES),enabled:false});
+  fs.writeFileSync(process.env.OUT, JSON.stringify({plugins}));
+'
 
 # ── example vault content → static JSON (docs/plans/cf-mobile-seed.md §3א) ──
 # template.js (cf/) exports TEMPLATE_FILES but imports plugins-generated.js,
