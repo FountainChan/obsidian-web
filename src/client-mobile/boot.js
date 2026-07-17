@@ -396,7 +396,7 @@ const MOBILE_SCRIPTS = [
   // רצים לפי סדר-רישום ללא קשר ל-capture flag (capture אמיתי דורש ancestor
   // בנתיב ה-propagation, לא את ה-target עצמו).
   function installCreateVaultInterceptor() {
-    document.addEventListener('click', function (e) {
+    var handler = function (e) {
       var btn = e.target && e.target.closest &&
         e.target.closest('.mobile-onboarding button.mod-cta, .mobile-vault-chooser-screen button.mod-cta');
       if (!btn) return;
@@ -415,6 +415,12 @@ const MOBILE_SCRIPTS = [
 
       e.preventDefault();
       e.stopImmediatePropagation();   // עוצר את onCreateVault הנייטיב (מונע את ה-mkdir הנכשל)
+
+      // one-shot: מאזינים ל-pointerdown+mousedown+click (ראה הרשמה למטה), אז
+      // אותה לחיצה עלולה לירות 3 פעמים → יצירת 3 vaults. הראשון תופס, השאר
+      // חסומים (preventDefault למעלה כבר עצר את הנייטיב בכל אירוע).
+      if (window.__owCreatingVault) return;
+      window.__owCreatingVault = true;
 
       var name = nameInput.value.trim() || 'Untitled';
       var selectedRadio = screen.querySelector('.mobile-onboarding-radio-option.is-selected');
@@ -444,7 +450,15 @@ const MOBILE_SCRIPTS = [
         var id2 = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
         navigateToVault(id2);   // relative (finding 1) — לא absolute '/?vault='
       }
-    }, true);   // capture-phase על document — ראה הערה למעלה
+    };
+    // pointerdown+mousedown+click (capture) — לא רק click. בחלון צר (auto-mobile,
+    // מסך .mobile-onboarding) ה-onCreateVault הנייטיב רץ על אירוע-מגע מוקדם
+    // (pointerup/touchend) שקדם ל-click → interceptor שמאזין רק ל-click מגיע
+    // מאוחר מדי → mkdir→/api/fs/mkdir→405 (הבאג של המשתמשת). תפיסה מוקדמת
+    // (pointerdown) חוסמת את הנייטיב לפני שהוא רץ. one-shot guard מונע כפילות.
+    ['pointerdown', 'mousedown', 'click'].forEach(function (evt) {
+      document.addEventListener(evt, handler, true);
+    });
   }
 
   // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
