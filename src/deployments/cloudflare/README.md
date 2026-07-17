@@ -35,6 +35,28 @@ previous Durable Object (`VaultDO`, server-backed vault) has been **removed**.
     production, deploy behind a **custom domain/route**: uncomment `routes` in
     `wrangler.toml`.
 
+## System plugins — layout-switcher (enabled) + LiveSync (installed, disabled)
+`build-assets.sh` builds `public/system-plugins/manifest.json` with **two**
+entries, served statically (CF static hosting has no `/api/system-plugins` —
+`seed-system-plugins.js` falls back to fetching this file when the API route
+404s):
+- **`obsidian-web-layout`** (`enabled:true`) — the desktop/mobile layout
+  switcher, active by default.
+- **`obsidian-livesync`** (`enabled:false`) — [Self-hosted
+  LiveSync](https://github.com/vrtmrz/obsidian-livesync), downloaded at build
+  time by `node scripts/install-livesync.js` (from the plugin's GitHub
+  releases into `vendor/plugins/obsidian-livesync/`, cached under
+  `.tmp/cache/livesync-releases/`) and copied into `public/system-plugins/`.
+  It ships **installed but disabled** — the files land in every new vault's
+  `.obsidian/plugins/obsidian-livesync/` on first visit, but `enabled:false`
+  means `seed-system-plugins.js` does **not** add it to
+  `.obsidian/community-plugins.json`, so it never auto-runs. The user enables
+  it manually (Settings → Community plugins → toggle), then configures a
+  CouchDB endpoint in the LiveSync settings tab. Pin a specific release with
+  `SEED_LIVESYNC_VERSION=<tag>` before running the build; if the download
+  fails (offline, GitHub outage), the build **warns and continues** with
+  layout-switcher only — never hard-fails on a missing third-party download.
+
 ## Example / demo vault content — **KEEP** (`template.js`)
 `template.js` holds the **demo vault** — 11 example files (`Welcome.md`,
 `How It Works.md`, `Features/*.md`, `.obsidian/*` config). It is **intentionally
@@ -47,9 +69,13 @@ wired yet** — follow-up, see below. Do **not** delete `template.js`.
   folders, reload-persistence — all client-side, verified static/no-server).
 - Native mobile onboarding/vault-chooser screen renders fully at `/`.
 - Example vault + system-plugins seed to OPFS on first visit (`cf-mobile-seed`).
-- **`POST /api/proxy-request`** — edge Worker proxy (`cf-worker-proxy`, this
-  slice) with allow-list, SSRF-safe redirects, and Cache API for immutable
-  downloads. See "What the Worker does now" above.
+- **`POST /api/proxy-request`** — edge Worker proxy (`cf-worker-proxy`) with
+  allow-list, SSRF-safe redirects, and Cache API for immutable downloads. See
+  "What the Worker does now" above.
+- **LiveSync preinstalled, disabled** (`cf-preinstall-livesync`, this slice) —
+  `obsidian-livesync` ships in every new vault's `.obsidian/plugins/`, off by
+  default; the user opts in via Settings → Community plugins. See "System
+  plugins" above.
 
 ## Known gaps (follow-ups)
 1. **Per-IP rate-limiting** on `/api/proxy-request` — not implemented yet.
@@ -85,3 +111,7 @@ wired yet** — follow-up, see below. Do **not** delete `template.js`.
 npm run build          # scripts/build-assets.sh → .tmp/deployments/cloudflare/public
 wrangler deploy        # from src/deployments/cloudflare/
 ```
+`npm run build` needs network access to GitHub (`api.github.com` +
+release-asset CDN) to fetch the LiveSync plugin on a cold cache — see
+"System plugins" above. It never blocks the build if unreachable (WARN +
+continue, layout-switcher only).
