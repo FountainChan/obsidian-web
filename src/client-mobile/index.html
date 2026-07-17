@@ -69,6 +69,12 @@
        docs/plans/opfs-seed-system-plugins.md §3. -->
   <script src="/client-mobile/seed-system-plugins.js?v=1"></script>
 
+  <!-- 3c. seed-on-boot של תוכן-דוגמה (Welcome/Features) לתוך vault ריק — CF
+       static בלבד (example-vault.json קיים רק ב-build של ה-CF deployment;
+       מקומי מדלג, 404). לא נוגע ב-.obsidian/ — ראה docs/plans/cf-mobile-seed.md
+       §3ג. חייב לפני boot.js כדי ש-window.__owSeedExampleVault יהיה קיים. -->
+  <script src="/client-mobile/seed-example-vault.js?v=1"></script>
+
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected
        DYNAMICALLY by boot.js after vault verification — same mechanism as

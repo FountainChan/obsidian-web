@@ -545,6 +545,17 @@ const MOBILE_SCRIPTS = [
         catch (e) { console.warn('[ow] seed system plugins failed', e); }
       }
 
+      // seed example content (Welcome.md, Features/*) לתוך vault ריק — CF static
+      // בלבד (example-vault.json קיים רק ב-build של ה-CF deployment; מקומי
+      // fetch מחזיר 404 ו-seedExampleVault מדלג). לא נוגע ב-.obsidian/ (finding
+      // 1 בבריף — הקונפיג בבלעדיות של seedSystemPlugins למעלה). לא חוסם את
+      // הפתיחה אם נכשל. ראה docs/plans/cf-mobile-seed.md §3ג.
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedExampleVault) {
+        var gr2 = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
+        try { await window.__owSeedExampleVault.seedExampleVault(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr2 })); }
+        catch (e) { console.warn('[ow] seed example vault failed', e); }
+      }
+
       setStatus('Loading Obsidian mobile...');
       console.log('[obsidian-web] vault ok, injecting mobile scripts');
 
