@@ -139,7 +139,22 @@ const MOBILE_SCRIPTS = [
     return { isMobile: small, reason: 'auto-' + (small ? 'mobile' : 'desktop') };
   }
   var layout = computeLayoutMode();
-  window.__owPlatformOverrides = { isMobile: layout.isMobile };
+  // מציבים את *כל* דגלי-הפלטפורמה עקבית עם מצב ה-layout (לא רק isMobile):
+  //  • isPhone/isMobile/isDesktop → ה-layout הכללי (ריווח, אנימציות, סרגלים)
+  //    מותאם למצב. הערה: מסך-הסטארטר עצמו (onboarding מול chooser) נבחר ב-bundle
+  //    לפי *קיום-vault* (אין vaults=onboarding, יש=chooser), לא לפי הרוחב —
+  //    הרוחב קובע רק את ה-layout *בתוך* אותו מסך.
+  //  • isDesktopApp:false — הריצה *תמיד* דפדפן (אין Node/Electron), גם במצב
+  //    desktop-layout → ה-bundle חוסם פלאגינים desktop-only (Terminal וכו',
+  //    isDesktopOnly) עם warning ומונע התקנה. isMobileApp:true (יש androidBridge).
+  window.__owPlatformOverrides = {
+    isMobile:     layout.isMobile,
+    isPhone:      layout.isMobile,
+    isTablet:     false,
+    isDesktop:    !layout.isMobile,
+    isDesktopApp: false,
+    isMobileApp:  true,
+  };
   console.log('[obsidian-web] platform overrides:', layout);
 
   // ── window.require לפלאגינים ───────────────────────────────────────────────
