@@ -318,3 +318,26 @@ describe('handleProxy — Cache API (DoD#4)', () => {
     }
   }, 20000);
 });
+
+// forbidden request-headers (Content-Length/Transfer-Encoding) — Worker fetch
+// HANGS on these (calev finding), so handleProxy must strip them before fetch.
+test('strips forbidden request headers before fetch (calev medium finding)', async () => {
+  const origFetch = globalThis.fetch;
+  let seenHeaders = null;
+  globalThis.fetch = async (u, opts) => {
+    seenHeaders = opts.headers;
+    return new Response('ok', { status: 200 });
+  };
+  try {
+    const req = new Request('https://x/', { method: 'POST', body: JSON.stringify({
+      url: 'https://raw.githubusercontent.com/o/r/main/x.txt', method: 'GET',
+      headers: { 'Content-Length': '99', 'Transfer-Encoding': 'chunked', 'Authorization': 'Basic zzz', 'Connection': 'keep-alive' },
+    }) });
+    const mockCaches = { default: { match: async () => undefined, put: async () => {} } };
+    await handleProxy(req, { waitUntil() {} }, mockCaches);
+    expect(seenHeaders['Content-Length'] || seenHeaders['content-length']).toBeUndefined();
+    expect(seenHeaders['Transfer-Encoding'] || seenHeaders['transfer-encoding']).toBeUndefined();
+    expect(seenHeaders['Connection'] || seenHeaders['connection']).toBeUndefined();
+    expect(seenHeaders['Authorization']).toBe('Basic zzz');   // legit header survives
+  } finally { globalThis.fetch = origFetch; }
+});

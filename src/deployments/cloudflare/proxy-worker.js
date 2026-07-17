@@ -131,6 +131,17 @@ export async function handleProxy(request, ctx) {
     let m = method;
     const hdrs = { 'User-Agent': 'Obsidian/1.12.7', ...headers };
     if (contentType) hdrs['Content-Type'] = contentType;
+    // Forbidden request-headers: Cloudflare's `fetch` does NOT throw on these —
+    // it HANGS indefinitely (empirically confirmed by calev), so the try/catch
+    // below never fires and a plugin-supplied Content-Length/Transfer-Encoding
+    // would silently wedge its download. `RequestUrlParam.headers` is
+    // plugin-controlled, so strip the request-body/connection-framing headers
+    // (the runtime sets them correctly itself). Node's http passes them through
+    // fine, hence proxy.js didn't need this — Worker fetch does.
+    const FORBIDDEN = ['host', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'upgrade', 'expect'];
+    for (const k of Object.keys(hdrs)) {
+      if (FORBIDDEN.indexOf(k.toLowerCase()) !== -1) delete hdrs[k];
+    }
     let reqBody = body ? (binary ? b64ToBytes(body) : body) : undefined;
 
     for (let i = 0; i < 6; i++) {
