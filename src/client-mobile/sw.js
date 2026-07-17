@@ -31,6 +31,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;        // cross-origin (CouchDB/GitHub) → pass-through
   if (url.pathname.startsWith('/api/')) return;           // dynamic → network-only
+  if (url.pathname === '/sw.js') return;                  // ה-SW עצמו — לעולם לא מ-cache (שהדפדפן יזהה גרסה חדשה)
 
   // navigation → network-first, fallback ל-'/' (ה-entry המבוסט; CF+מקומי מגישים מובייל ב-/)
   if (req.mode === 'navigate') {
