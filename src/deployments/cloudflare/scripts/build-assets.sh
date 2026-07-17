@@ -69,6 +69,10 @@ fi
 echo "  copying index.html..."
 cp "$MAIN_DIR/src/client-mobile/index.html" "$PUBLIC_DIR/index.html"
 
+# PWA web manifest at the root (scope "/"); icons ride along under
+# public/client-mobile/icons/ via the client-mobile copy above.
+cp "$MAIN_DIR/src/client-mobile/manifest.webmanifest" "$PUBLIC_DIR/manifest.webmanifest"
+
 # Replace ?v=<anything> on /client-mobile/ script tags with a build timestamp
 # so browsers always pick up updated files after a new deploy.
 BUST=$(date +%s)

@@ -152,6 +152,14 @@ function createApp(appConfig = {}) {
     }
   });
 
+  // PWA web manifest — served from the root so scope "/" is natural (icons live
+  // under /client-mobile/icons/, served by the existing /client-mobile mount).
+  app.get('/manifest.webmanifest', (req, res) => {
+    res.sendFile(path.join(appConfig.clientMobilePath, 'manifest.webmanifest'), {
+      headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' },
+    });
+  });
+
   // API routes.
   app.use('/api/bootstrap', createBootstrapRouter(vaultRegistry, appConfig.vaultPath, appConfig.bootstrap));
   app.use('/api/proxy-request', createProxyRouter());
