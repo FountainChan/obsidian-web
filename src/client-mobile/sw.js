@@ -34,7 +34,19 @@ self.addEventListener('fetch', (e) => {
 
   // navigation → network-first, fallback ל-'/' (ה-entry המבוסט; CF+מקומי מגישים מובייל ב-/)
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.open(CACHE).then(c => c.match('/').then(r => r || fetch(req)))));
+    // network-first, אבל **שומר את ה-shell ל-cache** על הצלחה online — אחרת
+    // offline נופל (calev NO-GO: '/' לא נכנס ל-cache, ה-fallback היה dead code).
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('/', copy));   // canonical shell under '/'
+          }
+          return res;
+        })
+        .catch(() => caches.open(CACHE).then((c) => c.match('/')))   // offline → ה-shell השמור
+    );
     return;
   }
   // worker.js/sim.js → network-first (finding 2: indexer רגיש; online=טרי, offline=cache)
