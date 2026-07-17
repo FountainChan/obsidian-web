@@ -25,3 +25,8 @@ docs-private/
 # brief-driven-slices: worktrees + verifier browser cache
 .worktrees/
 .playwright-cli/
+
+# build-time stub for the CF static-seed build (docs/plans/cf-mobile-seed.md
+# §3א) — generated + removed by build-assets.sh, safety net in case a build
+# is interrupted mid-way.
+src/deployments/cloudflare/plugins-generated.js
