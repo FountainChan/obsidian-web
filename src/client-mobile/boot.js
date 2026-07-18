@@ -351,6 +351,46 @@ const MOBILE_SCRIPTS = [
     obs.observe(document.body, { childList: true, subtree: true });
   }
 
+  // ── App-ready poll — helper רב-שימושי (docs/plans/vault-name-display.md §3) ─
+  // אין ב-boot.js נקודת-ready אמינה מובנית (s.onload רק סופר scripts
+  // שהורדו — לא app-init; אין onLayoutReady/setInterval/waitFor* קיים). ה-vendor
+  // קובע את window.app (בשימוש כבר ב-openVaultChooser click handlers למטה) —
+  // poll ל-window.app && window.app.vault הוא הדרך היציבה היחידה. timeout
+  // שקט (לא זורק, לא תוקע) — cb פשוט לא נקרא. שם קבוע (owWhenAppReady) —
+  // slice הבא (vault-note-deeplink) נשען על אותו helper, ראה coordination note.
+  function owWhenAppReady(cb, timeoutMs) {
+    var deadline = Date.now() + (timeoutMs || 8000);
+    (function poll() {
+      if (window.app && window.app.vault) { cb(window.app); return; }
+      if (Date.now() >= deadline) return;   // timeout: no-op שקט
+      setTimeout(poll, 50);
+    })();
+  }
+
+  // ── עדכון-DOM של תווית שם-הכספת בפאנל (vault-name-display §3) ──────────────
+  // probe אמפירי (Chromium headless): getName() נקרא **פעם-אחת** ב-construction
+  // של הפאנל (Ex constructor ב-vendor: `t.createDiv({cls:"workspace-drawer-
+  // vault-name",text:i})`, i=e.vault.getName() בזמן הבנייה) — override ל-
+  // getName **לבדו** אינו מספיק כשהפאנל כבר רונדר (המצב השכיח: הפאנל נבנה
+  // בערך באותו טיימינג שבו window.app הופך זמין, לפני שה-poll שלנו מתפענח).
+  // לכן תמיד קובעים textContent ישירות בנוסף ל-override. finding אביגיל 3
+  // (קריטי): הטרגט הוא ה-**child** `.workspace-drawer-vault-name` — לא
+  // `.workspace-drawer-vault-switcher` עצמו (זה ה-click-target של
+  // vault-switcher-fix, boot.js:699 למטה; דריסת textContent עליו תמחק ילדים
+  // ותשבור את ה-listener). idempotent — בטוח לקרוא שוב (reload/late-render).
+  // אם הפאנל עדיין לא רונדר כש-owWhenAppReady מתפענח — MutationObserver
+  // קצר-מועד (עקבי עם removeLoadingOverlayWhen למעלה), מתנתק אחרי match/timeout.
+  function refreshVaultProfileLabel(name) {
+    var nameEl = document.querySelector('.workspace-drawer-vault-name');
+    if (nameEl) { nameEl.textContent = name; return; }
+    var obs = new MutationObserver(function () {
+      var el = document.querySelector('.workspace-drawer-vault-name');
+      if (el) { el.textContent = name; obs.disconnect(); }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    setTimeout(function () { obs.disconnect(); }, 8000);
+  }
+
   // ── מסך-פתיחה נייטיב (no-vault) — seed רשימת ה-vaults ──────────────────────
   // מאכלס mobile-external-vaults (Lte של הנייטיב) + ow-known-vault-ids
   // (משמש גם ע"י owNativeVaultIdFromValue וגם ע"י capacitor-shim's stat()
@@ -681,6 +721,25 @@ const MOBILE_SCRIPTS = [
       // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
       // חולצה ל-injectMobileScripts() למעלה — נגישה גם לזרימת ה-no-vault.
       injectMobileScripts();
+
+      // ── שם-כספת מוצג מה-registry (docs/plans/vault-name-display.md §2/§3) ──
+      // לכספת OPFS (local/folder) עם רשומת-registry, __owV.name הוא השם
+      // שהמשתמשת נתנה; app.vault.getName() (basePath — ה-vault-id hash
+      // לכספות OPFS) לא מתאים לתצוגה בפאנל (§0). guard: רק local/folder +
+      // __owV.name לא-ריק — server ממשיך עם basename תקין (DoD#3, §2 "שינוי
+      // לשם המוצג בכספת server ❌"), יתום (אין רשומה) נופל ל-getName הרגיל
+      // (§9 Q3). ה-guard רץ רק בזרימת ה-VAULT_ID (לא בזרימת no-vault למעלה,
+      // ששם VAULT_TYPE='server' תמיד) — עונה על גבול §2 "אחרי app-ready".
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && __owV && __owV.name) {
+        owWhenAppReady(function (app) {
+          var desired = __owV.name;
+          if (app.vault && typeof app.vault.getName === 'function') {
+            var orig = app.vault.getName.bind(app.vault);
+            app.vault.getName = function () { return desired || orig(); };
+          }
+          refreshVaultProfileLabel(desired);
+        });
+      }
 
       // הסרת ספינר כשה-workspace מוכן
       removeLoadingOverlayWhen('.workspace');
