@@ -303,7 +303,9 @@
           const raw = (opts && opts.path) || '';
           const name = raw.split('/').filter(Boolean).pop() || 'Untitled';
           const id = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
-          window.location.href = window.location.pathname + '?vault=' + encodeURIComponent(id);
+          // path-based routing (slice url-routing): boot מתעלם מ-?vault= — חייב /vault/<id>
+          // (call-site זה נשמט ב-migration; הנתיב הזה רץ בדיוק על CF serverless — יעד ה-deploy).
+          window.location.href = '/vault/' + encodeURIComponent(id);
           return {};   // "הצלחה" — הניווט גובר על המשך הזרימה הנייטיבית
         } catch (e) {
           window.__owCreatingVault = false;   // כשל → נופלים חזרה לניסיון-שרת
