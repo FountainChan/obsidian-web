@@ -758,7 +758,7 @@ const MOBILE_SCRIPTS = [
       // ב-4 ריצות — "Cannot read properties of undefined (reading
       // 'onLayoutReady')"). guard מקומי — לא נוגע/מגדיר מחדש את owWhenAppReady
       // עצמו, רק ממתין בנוסף ל-workspace לפני שממשיכים. משותף לכיוון-נכנס
-      // (למטה) ולכיוון-יוצא (§3ג, commit הבא).
+      // (למטה) ולכיוון-יוצא (§3ג, למטה).
       function owWaitForWorkspace(app, cb) {
         if (app.workspace) { cb(app); return; }
         setTimeout(function () { owWaitForWorkspace(app, cb); }, 50);
@@ -784,6 +784,34 @@ const MOBILE_SCRIPTS = [
           });
         });
       }
+
+      // ── deep-link למסמך — כיוון-יוצא (vault-note-deeplink §3ג) ──────────────
+      // מעדכן את ה-URL לפי הקובץ הפעיל בכל שינוי (ניווט לקישור, מעבר בין
+      // מסמכים, סגירה). מקור-האמת הוא app.workspace.getActiveFile() (לא ה-arg
+      // של file-open, finding 1 בבריף) — נרשם גם על file-open וגם על
+      // active-leaf-change (file-open(null) לא מובטח בסגירה, active-leaf-change
+      // כן יורה על leaf ריק → getActiveFile()===null → DoD#5). guard VAULT_ID +
+      // מיקום בתוך בלוק vault-open בלבד (finding 2) — לא רץ בזרימת no-vault.
+      // pathname!==url מונע history entries מיותרים ולולאה מול הפתיחה-הנכנסת
+      // למעלה (replaceState לא עושה reload — boot לא רץ שוב, אין לולאה מבנית
+      // גם בלי ה-guard). owWaitForWorkspace — אותו guard-הגנה כמו כיוון-נכנס
+      // (§3ב, executor finding) למקרה ש-app.workspace עדיין undefined.
+      owWhenAppReady(function (app) {
+        if (!VAULT_ID) return;
+        owWaitForWorkspace(app, function (app) {
+          function syncUrlFromActiveFile() {
+            var url = '/vault/' + encodeURIComponent(VAULT_ID);
+            var file = app.workspace.getActiveFile && app.workspace.getActiveFile();
+            if (file && file.path) {
+              var p = file.path.replace(/\.md$/, '');
+              url += '/' + p.split('/').map(encodeURIComponent).join('/');
+            }
+            if (location.pathname !== url) history.replaceState(null, '', url);
+          }
+          app.workspace.on('file-open', syncUrlFromActiveFile);
+          app.workspace.on('active-leaf-change', syncUrlFromActiveFile);
+        });
+      });
 
       // ── Vault switcher click → openVaultChooser ──────────────────────────
       // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
