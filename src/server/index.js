@@ -91,7 +91,10 @@ function createApp(appConfig = {}) {
   // open, shareable vault URL. Both serve the same shell as / — boot.js
   // reads location.pathname to decide what to render. Not a redirect: the
   // id must stay visible/bookmarkable in the browser URL.
-  app.get(['/starter', '/starter.html', '/vault/:id'], (req, res) => {
+  // /vault/:id/* (docs/plans/vault-note-deeplink.md §3ד): document-level
+  // deep link — /vault/<id>/<note-path> (note-path may have nested
+  // segments). Same shell; boot.js parses id + note-path from the path.
+  app.get(['/starter', '/starter.html', '/vault/:id', '/vault/:id/*'], (req, res) => {
     sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 

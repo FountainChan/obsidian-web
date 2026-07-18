@@ -42,8 +42,14 @@ const MOBILE_SCRIPTS = [
   //   /starter    → מסך-בחירה, מתעלם מ-auto-resume (mobile-selected-vault/lastVaultId)
   //   כל path אחר (/, /mobile וכו') → entry: יש כספת-אחרונה → /vault/<id>; אחרת → /starter
   var __owPath = location.pathname;
-  var __owVaultMatch = __owPath.match(/^\/vault\/(.+)$/);
+  // vault-note-deeplink §3א: מפריד id (סגמנט יחיד — ids אמיתיים הם hashים בלי
+  // slash) מ-note-path (רב-סגמנטי, עשוי לכלול slashים — Features/Tags וכו').
+  var __owVaultMatch = __owPath.match(/^\/vault\/([^/]+)(?:\/(.*))?$/);
   var VAULT_ID = __owVaultMatch ? decodeURIComponent(__owVaultMatch[1]) : '';
+  // פענוח פר-סגמנט (שומר slashים כמפרידי-נתיב, מפענח תווים מקודדים בתוך שם).
+  var NOTE_PATH = (__owVaultMatch && __owVaultMatch[2])
+                    ? __owVaultMatch[2].split('/').map(decodeURIComponent).join('/')
+                    : '';
   var forceStarter = (__owPath === '/starter');
 
   // ── מסך-פתיחה נייטיב — helpers (opfs-ux) ───────────────────────────────────
@@ -349,6 +355,46 @@ const MOBILE_SCRIPTS = [
       }
     });
     obs.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ── App-ready poll — helper רב-שימושי (docs/plans/vault-name-display.md §3) ─
+  // אין ב-boot.js נקודת-ready אמינה מובנית (s.onload רק סופר scripts
+  // שהורדו — לא app-init; אין onLayoutReady/setInterval/waitFor* קיים). ה-vendor
+  // קובע את window.app (בשימוש כבר ב-openVaultChooser click handlers למטה) —
+  // poll ל-window.app && window.app.vault הוא הדרך היציבה היחידה. timeout
+  // שקט (לא זורק, לא תוקע) — cb פשוט לא נקרא. שם קבוע (owWhenAppReady) —
+  // slice הבא (vault-note-deeplink) נשען על אותו helper, ראה coordination note.
+  function owWhenAppReady(cb, timeoutMs) {
+    var deadline = Date.now() + (timeoutMs || 8000);
+    (function poll() {
+      if (window.app && window.app.vault) { cb(window.app); return; }
+      if (Date.now() >= deadline) return;   // timeout: no-op שקט
+      setTimeout(poll, 50);
+    })();
+  }
+
+  // ── עדכון-DOM של תווית שם-הכספת בפאנל (vault-name-display §3) ──────────────
+  // probe אמפירי (Chromium headless): getName() נקרא **פעם-אחת** ב-construction
+  // של הפאנל (Ex constructor ב-vendor: `t.createDiv({cls:"workspace-drawer-
+  // vault-name",text:i})`, i=e.vault.getName() בזמן הבנייה) — override ל-
+  // getName **לבדו** אינו מספיק כשהפאנל כבר רונדר (המצב השכיח: הפאנל נבנה
+  // בערך באותו טיימינג שבו window.app הופך זמין, לפני שה-poll שלנו מתפענח).
+  // לכן תמיד קובעים textContent ישירות בנוסף ל-override. finding אביגיל 3
+  // (קריטי): הטרגט הוא ה-**child** `.workspace-drawer-vault-name` — לא
+  // `.workspace-drawer-vault-switcher` עצמו (זה ה-click-target של
+  // vault-switcher-fix, boot.js:699 למטה; דריסת textContent עליו תמחק ילדים
+  // ותשבור את ה-listener). idempotent — בטוח לקרוא שוב (reload/late-render).
+  // אם הפאנל עדיין לא רונדר כש-owWhenAppReady מתפענח — MutationObserver
+  // קצר-מועד (עקבי עם removeLoadingOverlayWhen למעלה), מתנתק אחרי match/timeout.
+  function refreshVaultProfileLabel(name) {
+    var nameEl = document.querySelector('.workspace-drawer-vault-name');
+    if (nameEl) { nameEl.textContent = name; return; }
+    var obs = new MutationObserver(function () {
+      var el = document.querySelector('.workspace-drawer-vault-name');
+      if (el) { el.textContent = name; obs.disconnect(); }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    setTimeout(function () { obs.disconnect(); }, 8000);
   }
 
   // ── מסך-פתיחה נייטיב (no-vault) — seed רשימת ה-vaults ──────────────────────
@@ -682,8 +728,94 @@ const MOBILE_SCRIPTS = [
       // חולצה ל-injectMobileScripts() למעלה — נגישה גם לזרימת ה-no-vault.
       injectMobileScripts();
 
+      // ── שם-כספת מוצג מה-registry (docs/plans/vault-name-display.md §2/§3) ──
+      // לכספת OPFS (local/folder) עם רשומת-registry, __owV.name הוא השם
+      // שהמשתמשת נתנה; app.vault.getName() (basePath — ה-vault-id hash
+      // לכספות OPFS) לא מתאים לתצוגה בפאנל (§0). guard: רק local/folder +
+      // __owV.name לא-ריק — server ממשיך עם basename תקין (DoD#3, §2 "שינוי
+      // לשם המוצג בכספת server ❌"), יתום (אין רשומה) נופל ל-getName הרגיל
+      // (§9 Q3). ה-guard רץ רק בזרימת ה-VAULT_ID (לא בזרימת no-vault למעלה,
+      // ששם VAULT_TYPE='server' תמיד) — עונה על גבול §2 "אחרי app-ready".
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && __owV && __owV.name) {
+        owWhenAppReady(function (app) {
+          var desired = __owV.name;
+          if (app.vault && typeof app.vault.getName === 'function') {
+            var orig = app.vault.getName.bind(app.vault);
+            app.vault.getName = function () { return desired || orig(); };
+          }
+          refreshVaultProfileLabel(desired);
+        });
+      }
+
       // הסרת ספינר כשה-workspace מוכן
       removeLoadingOverlayWhen('.workspace');
+
+      // executor finding (vault-note-deeplink, אמפירי בChromium): owWhenAppReady
+      // (מ-#1) בודק רק window.app && window.app.vault — App.onload הוא
+      // async-generator (`this.vault=new mx(t)` ואז כמה awaits לפני
+      // `this.workspace=...`, מאומת בgrep על הbundle), אז window.app.workspace
+      // עלול עדיין להיות undefined באותו tick ש-vault כבר קיים (נתפס פעם אחת
+      // ב-4 ריצות — "Cannot read properties of undefined (reading
+      // 'onLayoutReady')"). guard מקומי — לא נוגע/מגדיר מחדש את owWhenAppReady
+      // עצמו, רק ממתין בנוסף ל-workspace לפני שממשיכים. משותף לכיוון-נכנס
+      // (למטה) ולכיוון-יוצא (§3ג, למטה).
+      // timeout מוגבל (calev finding: אחרת רקורסיה אינסופית אם App.onload
+      // קובע vault ואז נכשל לפני workspace — התיישר עם ה-8s deadline של
+      // owWhenAppReady: 160 ניסיונות × 50ms. שקט בכשל — cb פשוט לא נקרא).
+      function owWaitForWorkspace(app, cb, tries) {
+        if (app.workspace) { cb(app); return; }
+        if ((tries || 0) >= 160) return;
+        setTimeout(function () { owWaitForWorkspace(app, cb, (tries || 0) + 1); }, 50);
+      }
+
+      // ── deep-link למסמך — כיוון-נכנס (vault-note-deeplink §3ב) ─────────────
+      // NOTE_PATH הגיע מה-URL (/vault/<id>/<note-path>) — פותחים אותו אחרי
+      // ש-workspace מוכן (onLayoutReady, לא רק window.app קיים — owWhenAppReady
+      // לבד לא מבטיח שה-workspace layout כבר טעון). md בלי סיומת →
+      // getFirstLinkpathDest (idiomatic ל-Obsidian, פותר קישורים); קובץ אחר
+      // (עם סיומת, למשל תמונה) → fallback ל-getAbstractFileByPath (נתיב מדויק).
+      // מסמך לא-קיים → graceful: נשאר בתצוגת-ברירת-מחדל של הכספת, בלי שגיאה
+      // (DoD#3) — owWhenAppReady משתמש מחדש בהelper מ-vault-name-display (#1),
+      // לא מוגדר מחדש.
+      if (NOTE_PATH) {
+        owWhenAppReady(function (app) {
+          owWaitForWorkspace(app, function (app) {
+            app.workspace.onLayoutReady(function () {
+              var f = app.metadataCache.getFirstLinkpathDest(NOTE_PATH.replace(/\.md$/, ''), '')
+                      || app.vault.getAbstractFileByPath(NOTE_PATH);
+              if (f) app.workspace.getLeaf(false).openFile(f);
+            });
+          });
+        });
+      }
+
+      // ── deep-link למסמך — כיוון-יוצא (vault-note-deeplink §3ג) ──────────────
+      // מעדכן את ה-URL לפי הקובץ הפעיל בכל שינוי (ניווט לקישור, מעבר בין
+      // מסמכים, סגירה). מקור-האמת הוא app.workspace.getActiveFile() (לא ה-arg
+      // של file-open, finding 1 בבריף) — נרשם גם על file-open וגם על
+      // active-leaf-change (file-open(null) לא מובטח בסגירה, active-leaf-change
+      // כן יורה על leaf ריק → getActiveFile()===null → DoD#5). guard VAULT_ID +
+      // מיקום בתוך בלוק vault-open בלבד (finding 2) — לא רץ בזרימת no-vault.
+      // pathname!==url מונע history entries מיותרים ולולאה מול הפתיחה-הנכנסת
+      // למעלה (replaceState לא עושה reload — boot לא רץ שוב, אין לולאה מבנית
+      // גם בלי ה-guard). owWaitForWorkspace — אותו guard-הגנה כמו כיוון-נכנס
+      // (§3ב, executor finding) למקרה ש-app.workspace עדיין undefined.
+      owWhenAppReady(function (app) {
+        if (!VAULT_ID) return;
+        owWaitForWorkspace(app, function (app) {
+          function syncUrlFromActiveFile() {
+            var url = '/vault/' + encodeURIComponent(VAULT_ID);
+            var file = app.workspace.getActiveFile && app.workspace.getActiveFile();
+            if (file && file.path) {
+              var p = file.path.replace(/\.md$/, '');
+              url += '/' + p.split('/').map(encodeURIComponent).join('/');
+            }
+            if (location.pathname !== url) history.replaceState(null, '', url);
+          }
+          app.workspace.on('file-open', syncUrlFromActiveFile);
+          app.workspace.on('active-leaf-change', syncUrlFromActiveFile);
+        });
+      });
 
       // ── Vault switcher click → openVaultChooser ──────────────────────────
       // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
