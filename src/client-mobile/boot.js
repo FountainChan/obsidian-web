@@ -759,9 +759,13 @@ const MOBILE_SCRIPTS = [
       // 'onLayoutReady')"). guard מקומי — לא נוגע/מגדיר מחדש את owWhenAppReady
       // עצמו, רק ממתין בנוסף ל-workspace לפני שממשיכים. משותף לכיוון-נכנס
       // (למטה) ולכיוון-יוצא (§3ג, למטה).
-      function owWaitForWorkspace(app, cb) {
+      // timeout מוגבל (calev finding: אחרת רקורסיה אינסופית אם App.onload
+      // קובע vault ואז נכשל לפני workspace — התיישר עם ה-8s deadline של
+      // owWhenAppReady: 160 ניסיונות × 50ms. שקט בכשל — cb פשוט לא נקרא).
+      function owWaitForWorkspace(app, cb, tries) {
         if (app.workspace) { cb(app); return; }
-        setTimeout(function () { owWaitForWorkspace(app, cb); }, 50);
+        if ((tries || 0) >= 160) return;
+        setTimeout(function () { owWaitForWorkspace(app, cb, (tries || 0) + 1); }, 50);
       }
 
       // ── deep-link למסמך — כיוון-נכנס (vault-note-deeplink §3ב) ─────────────
