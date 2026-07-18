@@ -65,7 +65,7 @@
       vaults.forEach(function (v) {
         var li = document.createElement('li');
         var a = document.createElement('a');
-        a.href = '/mobile?vault=' + encodeURIComponent(v.id);
+        a.href = '/vault/' + encodeURIComponent(v.id);
         a.textContent = v.name + (v.type === 'folder' ? ' (folder)' : '');
         li.appendChild(a);
         listEl.appendChild(li);
@@ -76,7 +76,7 @@
       var nameEl = document.getElementById('ow-name');
       var name = nameEl.value.trim();
       var result = window.__owLocalVaults.create(name);
-      location.href = '/mobile?vault=' + encodeURIComponent(result.id);
+      location.href = '/vault/' + encodeURIComponent(result.id);
     });
 
     // "Open a folder as vault" — File System Access API, Chromium-only
@@ -89,7 +89,7 @@
           var dir = await window.showDirectoryPicker({ mode: 'readwrite' }); // user gesture
           var result = window.__owLocalVaults.create(dir.name, { type: 'folder' });
           await window.__owFolderHandles.saveHandle(result.id, dir);
-          location.href = '/mobile?vault=' + encodeURIComponent(result.id);
+          location.href = '/vault/' + encodeURIComponent(result.id);
         } catch (e) {
           if (e && e.name === 'AbortError') return; // user cancelled the picker
           console.error('[obsidian-web] open folder as vault failed:', e);

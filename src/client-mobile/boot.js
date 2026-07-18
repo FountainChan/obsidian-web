@@ -36,9 +36,15 @@ const MOBILE_SCRIPTS = [
 
   if (typeof global === 'undefined') window.global = window;
 
-  // ── Vault selection ────────────────────────────────────────────────────────
-  var params  = new URLSearchParams(location.search);
-  var VAULT_ID = params.get('vault') || '';           // deep-link בלבד גובר
+  // ── Vault selection — path-based routing (brief §0/§3ב) ────────────────────
+  // מקור-האמת עבר מ-?vault= (query, נמחק) ל-location.pathname:
+  //   /vault/<id> → כספת פתוחה <id> (גלוי, ניתן-לשיתוף/סימניה)
+  //   /starter    → מסך-בחירה, מתעלם מ-auto-resume (mobile-selected-vault/lastVaultId)
+  //   כל path אחר (/, /mobile וכו') → entry: יש כספת-אחרונה → /vault/<id>; אחרת → /starter
+  var __owPath = location.pathname;
+  var __owVaultMatch = __owPath.match(/^\/vault\/(.+)$/);
+  var VAULT_ID = __owVaultMatch ? decodeURIComponent(__owVaultMatch[1]) : '';
+  var forceStarter = (__owPath === '/starter');
 
   // ── מסך-פתיחה נייטיב — helpers (opfs-ux) ───────────────────────────────────
   // הנייטיב (`.mobile-vault-chooser-screen`) שומר בחירת-vault תחת
@@ -60,15 +66,12 @@ const MOBILE_SCRIPTS = [
     return null;
   }
 
-  // navigateToVault — **relative** entry-path (brief §3ב finding 1, §9 Q2):
-  // location.pathname (not absolute '/?vault=') so the entry stays whichever
-  // route served this page — CF serves the mobile client at '/', local dev
-  // serves it at '/mobile'. An absolute '/?vault=' would hit the *desktop*
-  // client locally (index.js:77, doesn't know about __owLocalVaults) and
-  // "lose" the OPFS vault. Used by both the Create-vault interceptor below
-  // and the native vault-open bridge (Bug 2b fix).
+  // navigateToVault — path-based, **אבסולוטי** (brief §3ב): '/vault/<id>' הוא
+  // עכשיו מקור-האמת ל-URL, גלוי ונשאר (ניתן-לשיתוף/סימניה) — לא תלוי יותר
+  // באיזה path הגיש את הדף (CF/מקומי מגישים שניהם אותו shell). משמש הן ע"י
+  // ה-Create-vault interceptor למטה והן ע"י הגישור native-vault-open (Bug 2b).
   function navigateToVault(id) {
-    location.href = location.pathname + '?vault=' + encodeURIComponent(id);
+    location.href = '/vault/' + encodeURIComponent(id);
   }
 
   // מודל הנייטיב: 'mobile-selected-vault' = "כספת פתוחה/נבחרה" — מקור-האמת
@@ -78,15 +81,27 @@ const MOBILE_SCRIPTS = [
   // שהמסך לא חזר: lastVaultId שלנו נשאר מלא כי הנייטיב לא מנקה אותו).
   // אם sel קיים אבל לא ניתן לפענוח מול הregistry (יתום/stale) — fallback
   // ל-lastVaultId, כדי לא לשבור server-vault resume (§3א, DoD#4/#5).
-  if (!VAULT_ID) {
+  //
+  // path-based routing (brief §3ב): /vault/<id> כבר קבע VAULT_ID מה-path —
+  // אין צורך להתייעץ עם localStorage. /starter מתעלם מ-auto-resume לגמרי
+  // (forceStarter, למטה). רק path "entry" (לא /vault/<id>, לא /starter — /,
+  // /mobile וכו') מפנה בעצמו ל-/vault/<id> (יש כספת-אחרונה) או ל-/starter
+  // (אין) — location.replace (לא push) כדי שלא ייווצר loop ב-back.
+  if (forceStarter) {
+    // מנקה מפתח-בחירה פעם-אחת (בלי reload נוסף — אין loop) כדי שהבאנדל
+    // הנייטיב לא ינסה auto-open כשהוא רץ מיד למטה (מסך-הפתיחה, no-vault).
+    if (localStorage.getItem('mobile-selected-vault')) localStorage.removeItem('mobile-selected-vault');
+    localStorage.removeItem('obsidian-web:lastVaultId');
+  } else if (!VAULT_ID) {
     var sel = localStorage.getItem('mobile-selected-vault');
-    if (sel) {
-      VAULT_ID = owNativeVaultIdFromValue(sel) || localStorage.getItem('obsidian-web:lastVaultId') || '';
+    var resumeId = sel ? (owNativeVaultIdFromValue(sel) || localStorage.getItem('obsidian-web:lastVaultId') || '') : '';
+    if (!sel) localStorage.removeItem('obsidian-web:lastVaultId');
+    if (resumeId) {
+      location.replace('/vault/' + encodeURIComponent(resumeId));
     } else {
-      // native close/"ניהול כספות" הסיר את מפתח הבחירה → מנקים lastVaultId
-      // (פעם אחת, אין reload נוסף — אין loop) ומראים את מסך-הפתיחה הנייטיב.
-      localStorage.removeItem('obsidian-web:lastVaultId');
+      location.replace('/starter');
     }
+    return;   // מנווטים החוצה — אין מה לעשות יותר בטיק הזה
   }
 
   // Vault type: 'local' (OPFS, no server round-trip), 'folder' (real
@@ -109,19 +124,10 @@ const MOBILE_SCRIPTS = [
     localStorage.setItem('obsidian-web:lastVaultId', VAULT_ID);
     localStorage.setItem('mobile-selected-vault', VAULT_ID);
     localStorage.setItem('enable-plugin-' + VAULT_ID, 'true');
-
-    // Bug 1 (calev NBug1): הנייטיב "ניהול כספות"/close עושה
-    // removeItem('mobile-selected-vault') + location.reload() — reload *רגיל*
-    // ש**משמר את ה-query string**. אחרי create/switch ה-URL הוא
-    // '/mobile?vault=<id>', כך שה-reload היה שומר את ?vault= ו-boot:41 היה
-    // עושה auto-resume → ה-close מובס. מרגע שהכספת פתוחה, מקור-האמת הוא
-    // 'mobile-selected-vault' (נכתב זה עתה) — ה-?vault= ב-URL כבר מיותר.
-    // מסירים אותו (replaceState, בלי reload) כדי שה-close הבא ינחת על URL
-    // נקי → מסך-הפתיחה. Deep-links ו-navigateToVault עדיין עובדים (boot קרא
-    // את ?vault= לפני ההסרה), ו-reload ידני מתחדש מ-mobile-selected-vault.
-    if (params.get('vault') && window.history && history.replaceState) {
-      try { history.replaceState(null, '', location.pathname); } catch (e) {}
-    }
+    // path-based routing (brief §3ב): אין יותר ?vault= query לנקות — ה-URL
+    // '/vault/<id>' עצמו הוא מקור-האמת ונשאר גלוי (Bug 1 המקורי טופל אחרת —
+    // ראה installNativeVaultOpenBridge, שם היירוט על removeItem('mobile-
+    // selected-vault') מנווט ישירות ל-/starter במקום לסמוך על reload+URL).
   }
 
   // ── Platform overrides — applied BEFORE app.js loads ──────────────────────
@@ -293,7 +299,10 @@ const MOBILE_SCRIPTS = [
   console.log('[obsidian-web] mobile boot: require + shims installed, vault=' + VAULT_ID);
 
   // ── אימות vault + הזרקה דינמית של scripts ─────────────────────────────────
-  if (location.pathname === '/starter') return;   // ל-/starter דף משלו
+  // (הוסר guard-return ל-pathname==='/starter' — brief §3ב: /starter מגיש
+  // עכשיו את אותו shell/boot.js כמו כל path אחר; forceStarter כבר אילץ
+  // VAULT_ID='' למעלה, כך שהזרימה ממשיכה ישר לענף no-vault למטה ומרנדרת את
+  // מסך-הפתיחה הנייטיב — בדיוק ההתנהגות הרצויה, בלי branch נפרד.)
 
   var statusEl = document.getElementById('ow-status');
   function setStatus(text) {
@@ -379,22 +388,55 @@ const MOBILE_SCRIPTS = [
   // את הכתיבה הזו (monkey-patch ל-localStorage.setItem, מותקן רק בזרימת
   // no-vault) ומנווטים בעצמנו ל-vault שנבחר — כך זרימת ה-boot.js הרגילה
   // (OPFS/folder/server, seed system plugins וכו') רצה כרגיל.
-  // Bug 2b (brief §3ג, finding 5): navigateToVault (relative) במקום
-  // '/mobile?vault=' הקשיח — שבר את CF (שם ה-entry הוא '/', אין route
-  // '/mobile'). relative שומר גם CF וגם מקומי (זהה ל-Bug 2 finding 1).
+  // Bug 2b (brief §3ג, finding 5): navigateToVault (path-based, '/vault/<id>')
+  // במקום '/mobile?vault=' הקשיח — שבר את CF (שם ה-entry הוא '/', אין route
+  // '/mobile'). path-based שומר גם CF וגם מקומי (זהה ל-Bug 2 finding 1).
+  //
+  // brief §3ב finding 4 (קריטי, "מעבר-מיד-סשן"): מותקן עכשיו **גם** בענף
+  // vault-open (לא רק no-vault) — אחרת switch (בחירת vault אחר מהרשימה)
+  // רץ נייטיבית (setItem+reload באותו URL) ולא נוחת על /vault/<newid>.
+  //
+  // executor finding (אמפירי, spike ידני ב-Chromium): register() הנייטיב
+  // (הפונקציה שמריצה את ה-setItem('mobile-selected-vault', t) שלמעלה) רצה
+  // **גם** כחלק מהתחלת-עבודה הרגילה של app.js כש-mobile-selected-vault כבר
+  // מוגדר לפני שהבאנדל עלה (בדיוק המצב שלנו — boot.js כותב אותו למעלה, לפני
+  // injectMobileScripts). זה כתיבה **חוזרת של אותו id** (לא switch אמיתי) —
+  // בלי guard, זה גרם ל-navigateToVault(sameId) → location.href לאותו URL →
+  // reload → boot.js רץ מחדש → אותה כתיבה חוזרת → **loop אינסופי** (נתפס
+  // ב-manual testing, ~55 מחזורי "vault ok, injecting mobile scripts" בלוג).
+  // מיירטים רק כש-id **שונה** מה-VAULT_ID הפתוח כרגע (switch אמיתי); כתיבה
+  // חוזרת של אותו id עוברת ל-origSetItem כרגיל (no-op, אין ניווט).
+  //
+  // סגירה (executor, לא כתוב מפורש בבריף §3ב אבל נדרש ע"י DoD#5): הנייטיב
+  // "close-vault"/openVaultChooser() עושה removeItem('mobile-selected-vault')
+  // + reload — עם URL קבוע (/vault/<id> נשאר path-based, לא ?vault= שנוקה
+  // כבר עם ה-navigation). reload כזה היה נוחת שוב על אותו /vault/<id> (path
+  // עדיין תואם) במקום /starter. מיירטים גם את removeItem, באותה משפחת-עוגן,
+  // ומנווטים ישירות — עקבי עם המנגנון הקיים ל-setItem, בלי לסמוך על תזמון
+  // reload/URL. פעיל רק כשכספת פתוחה (VAULT_ID truthy בזמן ההתקנה); בענף
+  // no-vault הכתיבה/מחיקה של המפתח כבר מטופלת ע"י הזרימה הנייטיבית הרגילה.
   function installNativeVaultOpenBridge() {
     if (window.__owNativeVaultBridgeInstalled) return;
     window.__owNativeVaultBridgeInstalled = true;
     var origSetItem = localStorage.setItem.bind(localStorage);
+    var origRemoveItem = localStorage.removeItem.bind(localStorage);
+    var hadOpenVault = !!VAULT_ID;
     localStorage.setItem = function (key, value) {
       if (key === 'mobile-selected-vault') {
         var id = owNativeVaultIdFromValue(value);
-        if (id) {
+        if (id && id !== VAULT_ID) {
           navigateToVault(id);
           return;
         }
       }
       return origSetItem(key, value);
+    };
+    localStorage.removeItem = function (key) {
+      if (key === 'mobile-selected-vault' && hadOpenVault) {
+        location.href = '/starter';
+        return;
+      }
+      return origRemoveItem(key);
     };
   }
 
@@ -463,7 +505,7 @@ const MOBILE_SCRIPTS = [
           });
       } else {
         var id2 = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
-        navigateToVault(id2);   // relative (finding 1) — לא absolute '/?vault='
+        navigateToVault(id2);   // path-based — '/vault/<id2>', ניתן-לשיתוף
       }
     };
     // pointerdown+mousedown+click (capture) — לא רק click. בחלון צר (auto-mobile,
@@ -477,8 +519,8 @@ const MOBILE_SCRIPTS = [
   }
 
   // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
-  // אין VAULT_ID תקף (לא ב-?vault=, לא ב-lastVaultId, ולא מ-mobile-selected-
-  // vault תקף — ראה למעלה). ה-shims כבר מותקנים (require/capacitor) — מזריקים
+  // אין VAULT_ID תקף (לא ב-/vault/<id> path, forceStarter, או שה-entry redirect
+  // למעלה כבר קבע שאין כספת-אחרונה — ראה למעלה). ה-shims כבר מותקנים (require/capacitor) — מזריקים
   // ישירות את ה-bundle הנייטיב; מסך ה-vault-chooser שלו (Setup Sync/Create new
   // vault/Open folder as vault + רשימה) מתרנדר מלא בלי שינוי (spike §0).
   // choose()/stat() polyfill + seedNativeVaultList() + הגישור למעלה מחווטים
@@ -563,6 +605,15 @@ const MOBILE_SCRIPTS = [
   verifyPromise
     .then(async function(stat) {
       if (!stat || (!stat.isDirectory && stat.type !== 'directory')) throw new Error('Vault path is not a directory');
+
+      // brief §3ב finding 4 (קריטי): מתקינים את הגישור גם כשכספת פתוחה — לא
+      // רק בענף no-vault (למטה). בלי זה, switch/close שרצים מתוך vault פתוח
+      // (בחירת vault אחר ברשימה, "close-vault"/openVaultChooser) רצים
+      // נייטיבית (setItem/removeItem+reload) ולא נוחתים על /vault/<newid>
+      // או /starter בהתאמה. installNativeVaultOpenBridge idempotent
+      // (window.__owNativeVaultBridgeInstalled) — בטוח לקרוא גם אם הענף
+      // no-vault כבר התקין (לא קורה באותו טעינת-עמוד, אבל להיות עקבי).
+      installNativeVaultOpenBridge();
 
       // seed system plugins ל-OPFS/folder לפני טעינת Obsidian (כדי ש-
       // community-plugins.json יהיה מוכן כש-Obsidian קורא אותו) — local
