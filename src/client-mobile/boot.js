@@ -42,8 +42,14 @@ const MOBILE_SCRIPTS = [
   //   /starter    → מסך-בחירה, מתעלם מ-auto-resume (mobile-selected-vault/lastVaultId)
   //   כל path אחר (/, /mobile וכו') → entry: יש כספת-אחרונה → /vault/<id>; אחרת → /starter
   var __owPath = location.pathname;
-  var __owVaultMatch = __owPath.match(/^\/vault\/(.+)$/);
+  // vault-note-deeplink §3א: מפריד id (סגמנט יחיד — ids אמיתיים הם hashים בלי
+  // slash) מ-note-path (רב-סגמנטי, עשוי לכלול slashים — Features/Tags וכו').
+  var __owVaultMatch = __owPath.match(/^\/vault\/([^/]+)(?:\/(.*))?$/);
   var VAULT_ID = __owVaultMatch ? decodeURIComponent(__owVaultMatch[1]) : '';
+  // פענוח פר-סגמנט (שומר slashים כמפרידי-נתיב, מפענח תווים מקודדים בתוך שם).
+  var NOTE_PATH = (__owVaultMatch && __owVaultMatch[2])
+                    ? __owVaultMatch[2].split('/').map(decodeURIComponent).join('/')
+                    : '';
   var forceStarter = (__owPath === '/starter');
 
   // ── מסך-פתיחה נייטיב — helpers (opfs-ux) ───────────────────────────────────
@@ -743,6 +749,41 @@ const MOBILE_SCRIPTS = [
 
       // הסרת ספינר כשה-workspace מוכן
       removeLoadingOverlayWhen('.workspace');
+
+      // executor finding (vault-note-deeplink, אמפירי בChromium): owWhenAppReady
+      // (מ-#1) בודק רק window.app && window.app.vault — App.onload הוא
+      // async-generator (`this.vault=new mx(t)` ואז כמה awaits לפני
+      // `this.workspace=...`, מאומת בgrep על הbundle), אז window.app.workspace
+      // עלול עדיין להיות undefined באותו tick ש-vault כבר קיים (נתפס פעם אחת
+      // ב-4 ריצות — "Cannot read properties of undefined (reading
+      // 'onLayoutReady')"). guard מקומי — לא נוגע/מגדיר מחדש את owWhenAppReady
+      // עצמו, רק ממתין בנוסף ל-workspace לפני שממשיכים. משותף לכיוון-נכנס
+      // (למטה) ולכיוון-יוצא (§3ג, commit הבא).
+      function owWaitForWorkspace(app, cb) {
+        if (app.workspace) { cb(app); return; }
+        setTimeout(function () { owWaitForWorkspace(app, cb); }, 50);
+      }
+
+      // ── deep-link למסמך — כיוון-נכנס (vault-note-deeplink §3ב) ─────────────
+      // NOTE_PATH הגיע מה-URL (/vault/<id>/<note-path>) — פותחים אותו אחרי
+      // ש-workspace מוכן (onLayoutReady, לא רק window.app קיים — owWhenAppReady
+      // לבד לא מבטיח שה-workspace layout כבר טעון). md בלי סיומת →
+      // getFirstLinkpathDest (idiomatic ל-Obsidian, פותר קישורים); קובץ אחר
+      // (עם סיומת, למשל תמונה) → fallback ל-getAbstractFileByPath (נתיב מדויק).
+      // מסמך לא-קיים → graceful: נשאר בתצוגת-ברירת-מחדל של הכספת, בלי שגיאה
+      // (DoD#3) — owWhenAppReady משתמש מחדש בהelper מ-vault-name-display (#1),
+      // לא מוגדר מחדש.
+      if (NOTE_PATH) {
+        owWhenAppReady(function (app) {
+          owWaitForWorkspace(app, function (app) {
+            app.workspace.onLayoutReady(function () {
+              var f = app.metadataCache.getFirstLinkpathDest(NOTE_PATH.replace(/\.md$/, ''), '')
+                      || app.vault.getAbstractFileByPath(NOTE_PATH);
+              if (f) app.workspace.getLeaf(false).openFile(f);
+            });
+          });
+        });
+      }
 
       // ── Vault switcher click → openVaultChooser ──────────────────────────
       // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
