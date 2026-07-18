@@ -86,12 +86,13 @@ function createApp(appConfig = {}) {
     sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
-  // /starter no longer serves the desktop starter shell (removed along with
-  // src/client). Redirect (not 404) because src/client-mobile/boot.js:610/617
-  // still navigate to /starter on vault-switcher click and error recovery —
-  // the redirect lands them back on the native mobile screen at /.
-  app.get(['/starter', '/starter.html'], (req, res) => {
-    res.redirect(302, '/');
+  // Path-based routing (docs/plans/url-routing.md §3ג): /starter is the
+  // chooser/onboarding route (ignores auto-resume) and /vault/:id is an
+  // open, shareable vault URL. Both serve the same shell as / — boot.js
+  // reads location.pathname to decide what to render. Not a redirect: the
+  // id must stay visible/bookmarkable in the browser URL.
+  app.get(['/starter', '/starter.html', '/vault/:id'], (req, res) => {
+    sendHtmlWithCacheBust(res, path.join(appConfig.clientMobilePath, 'index.html'));
   });
 
   // Static files.
@@ -130,6 +131,35 @@ function createApp(appConfig = {}) {
       });
     });
   }
+
+  // Service Worker (offline + asset-cache — docs/plans/service-worker-offline.md
+  // §3ג) — served from the root so its scope covers the whole app
+  // (Service-Worker-Allowed:/). __OW_BUILD__ is replaced with the same
+  // cache-bust value used for ?v=<bust> on script tags, so a code change
+  // (new mtime hash) produces a new SW cache automatically. no-cache on the
+  // SW response itself — otherwise the browser could pin an old SW.
+  app.get('/sw.js', async (req, res) => {
+    try {
+      const raw = await fsp.readFile(path.join(appConfig.clientMobilePath, 'sw.js'), 'utf8');
+      const src = raw.replace(/__OW_BUILD__/g, cacheBust);
+      res.set({
+        'Content-Type': 'application/javascript',
+        'Cache-Control': 'no-cache',
+        'Service-Worker-Allowed': '/',
+      });
+      res.send(src);
+    } catch (e) {
+      res.status(500).send('// sw unavailable');
+    }
+  });
+
+  // PWA web manifest — served from the root so scope "/" is natural (icons live
+  // under /client-mobile/icons/, served by the existing /client-mobile mount).
+  app.get('/manifest.webmanifest', (req, res) => {
+    res.sendFile(path.join(appConfig.clientMobilePath, 'manifest.webmanifest'), {
+      headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' },
+    });
+  });
 
   // API routes.
   app.use('/api/bootstrap', createBootstrapRouter(vaultRegistry, appConfig.vaultPath, appConfig.bootstrap));

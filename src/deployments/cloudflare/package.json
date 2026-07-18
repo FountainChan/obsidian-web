@@ -4,9 +4,10 @@
   "description": "Cloudflare Workers deployment for obsidian-web (demo + personal use)",
   "private": true,
   "scripts": {
-    "build":  "bash scripts/build-assets.sh",
+    "build": "bash scripts/build-assets.sh",
     "deploy": "bash scripts/build-assets.sh && wrangler deploy",
-    "dev":    "bash scripts/build-assets.sh && wrangler dev"
+    "dev": "bash scripts/build-assets.sh && wrangler dev",
+    "test": "bun test test/*.test.js"
   },
   "devDependencies": {
     "wrangler": "^3.0.0"

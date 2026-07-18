@@ -21,7 +21,12 @@
   'use strict';
 
   async function seedSystemPlugins(store) {
-    const man = await fetch('/api/system-plugins').then((r) => r.json()).catch(() => null);
+    let man = await fetch('/api/system-plugins').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    let base = 'server';
+    if (!man || !man.plugins) {                 // CF static: אין /api → static fallback
+      man = await fetch('/system-plugins/manifest.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      base = 'static';
+    }
     if (!man || !man.plugins) return;
 
     const enabled = [];
@@ -39,7 +44,10 @@
       // ולא מתעדכן; ה-boot הבא ינסה שוב כי המ-marker לא ישקף את הגרסה הנוכחית).
       let allOk = true;
       for (const f of p.files) {
-        const resp = await fetch('/api/system-plugin-file?id=' + encodeURIComponent(p.id) + '&file=' + encodeURIComponent(f)).catch(() => null);
+        const url = base === 'static'
+          ? '/system-plugins/' + p.id + '/' + encodeURIComponent(f)
+          : '/api/system-plugin-file?id=' + encodeURIComponent(p.id) + '&file=' + encodeURIComponent(f);
+        const resp = await fetch(url).catch(() => null);
         if (!resp || !resp.ok) { allOk = false; break; }
         const buf = await resp.arrayBuffer();
         // system plugins שלנו טקסט (json/js/css) → utf8 (עקבי עם חוזה OpfsStore)

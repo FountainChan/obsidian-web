@@ -1,9 +1,24 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <!-- Path-based routing (docs/plans/url-routing.md §3א): worker.js ב-vendor
+       bundle נטען עם URL יחסי ("worker.js") — תחת /vault/<id> ה-document base
+       הוא /vault/, אז ללא <base> זה יפתור ל-/vault/worker.js → 404 → האינדקסר
+       מת. <base href="/"> מיישב את כל ה-URLs היחסיים מול השורש בכל path. -->
+  <base href="/">
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
   <title>Obsidian Web</title>
+  <!-- PWA: installable + home-screen icon + theme -->
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <meta name="theme-color" content="#1e1e1e"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Obsidian Web"/>
+  <link rel="apple-touch-icon" href="/client-mobile/icons/icon-180.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/client-mobile/icons/icon-192.png"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/client-mobile/icons/favicon-32.png"/>
   <link href="/obsidian-mobile/app.css" type="text/css" rel="stylesheet"/>
   <style>
     #ow-loading {
@@ -30,6 +45,11 @@
     <div class="ow-spinner"></div>
     <div class="ow-status" id="ow-status"></div>
   </div>
+
+  <!-- -1. רישום Service Worker (offline + asset-cache) — non-blocking, נטען
+       מוקדם אבל רק מתחיל לפעול אחרי window 'load' (לא מעכב boot).
+       ראה docs/plans/service-worker-offline.md §3ב. -->
+  <script src="/client-mobile/register-sw.js?v=1"></script>
 
   <!-- 0. Local vault registry + OPFS store — חייבים להיטען לפני capacitor-shim
        כדי ש-window.__owLocalVaults / window.__owOpfsStore יהיו קיימים כשה-
@@ -68,6 +88,12 @@
        קיים כש-boot.js קורא לו אחרי אימות ה-vault. ראה
        docs/plans/opfs-seed-system-plugins.md §3. -->
   <script src="/client-mobile/seed-system-plugins.js?v=1"></script>
+
+  <!-- 3c. seed-on-boot של תוכן-דוגמה (Welcome/Features) לתוך vault ריק — CF
+       static בלבד (example-vault.json קיים רק ב-build של ה-CF deployment;
+       מקומי מדלג, 404). לא נוגע ב-.obsidian/ — ראה docs/plans/cf-mobile-seed.md
+       §3ג. חייב לפני boot.js כדי ש-window.__owSeedExampleVault יהיה קיים. -->
+  <script src="/client-mobile/seed-example-vault.js?v=1"></script>
 
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected

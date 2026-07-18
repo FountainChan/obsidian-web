@@ -289,6 +289,29 @@
     },
 
     async mkdir(opts) {
+      // ── רשת-ביטחון ל"Create a vault" הנייטיב ──────────────────────────────
+      // כשאין vault פעיל (window.__owVaultId ריק — boot לא פתר vault), mkdir
+      // הוא ה-onCreateVault הנייטיב שיוצר את ה-vault החדש. על פריסת CF/serverless
+      // אין /api/fs → הוא היה מחזיר 405; וה-DOM interceptor (boot.js) שביר על
+      // פני וריאציות מסך/אירוע/timing (.mobile-onboarding מול .mobile-vault-
+      // chooser-screen; pointerup מול click). כאן, ברמת ה-FS, תופסים בוודאות:
+      // יוצרים OPFS vault (בשם הסגמנט האחרון של הנתיב) ומנווטים אליו. מתואם עם
+      // ה-DOM interceptor דרך window.__owCreatingVault (one-shot משותף → לא כפול).
+      if (!window.__owVaultId && window.__owLocalVaults && !window.__owCreatingVault) {
+        window.__owCreatingVault = true;
+        try {
+          const raw = (opts && opts.path) || '';
+          const name = raw.split('/').filter(Boolean).pop() || 'Untitled';
+          const id = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
+          // path-based routing (slice url-routing): boot מתעלם מ-?vault= — חייב /vault/<id>
+          // (call-site זה נשמט ב-migration; הנתיב הזה רץ בדיוק על CF serverless — יעד ה-deploy).
+          window.location.href = '/vault/' + encodeURIComponent(id);
+          return {};   // "הצלחה" — הניווט גובר על המשך הזרימה הנייטיבית
+        } catch (e) {
+          window.__owCreatingVault = false;   // כשל → נופלים חזרה לניסיון-שרת
+        }
+      }
+
       const p = fullPath(opts);
       const res = await fetch('/api/fs/mkdir', {
         method: 'POST',
