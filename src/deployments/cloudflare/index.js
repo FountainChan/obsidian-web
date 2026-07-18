@@ -26,6 +26,14 @@ export default {
     if (url.pathname === '/api/proxy-request' && request.method === 'POST') {
       return handleProxy(request, ctx);
     }
+    if (request.method === 'GET' &&
+        (url.pathname === '/starter' || url.pathname.startsWith('/vault/'))) {
+      // fetch את ה-root shell '/' (200) — לא '/index.html' (finding 2: html_handling
+      // עלול להחזיר 307 מ-'/index.html' ל-'/' ולאבד את ה-deep-link). fetch של '/'
+      // מחזיר את ה-shell כ-200; ה-URL בדפדפן נשאר /vault/<id> (זו לא הפניה, זה גוף),
+      // ו-boot קורא את location.pathname האמיתי. (אומת ע"י אביגיל: 200, לא 307.)
+      return env.ASSETS.fetch(new Request(new URL('/', url), request));
+    }
     // Everything else: the static app bundle. Vault storage is OPFS in the
     // browser, not the server.
     return env.ASSETS.fetch(request);
