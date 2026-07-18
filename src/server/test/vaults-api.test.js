@@ -310,3 +310,27 @@ test('vault/:id route serves the mobile shell with the id visible in the URL', a
   const body = await response.text();
   assert.match(body, /shell/);
 });
+
+test('vault/:id/* route serves the mobile shell for a nested note deep link', async (t) => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'obsidian-web-'));
+  t.after(() => fsp.rm(tmp, { recursive: true, force: true }));
+
+  const clientMobilePath = path.join(tmp, 'client-mobile');
+  await fsp.mkdir(clientMobilePath);
+  await fsp.writeFile(path.join(clientMobilePath, 'index.html'), '<html><body>shell</body></html>');
+
+  const server = await startTestServer({
+    clientMobilePath,
+    obsidianPath: path.join(tmp, 'obsidian'),
+    registryPath: path.join(tmp, 'vaults.json'),
+    vaultPath: tmp,
+  });
+  t.after(server.close);
+
+  // docs/plans/vault-note-deeplink.md §3ד/DoD#1 — document-level deep link
+  // with a nested note path still serves the same shell (200), not 404.
+  const response = await fetch(server.baseUrl + '/vault/x/Features/Tags', { redirect: 'manual' });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.match(body, /shell/);
+});
