@@ -2,6 +2,29 @@
 
 > ‏רציונל ‏ארכיטקטוני ‏פר-slice (‏מרדכי). ‏ליד הקוד, ‏לא ‏בריפו ‏השיטה.
 
+## 2026-07-20 — folder-refresh-toolbar: כפתור-רענון בסרגל ה-file-explorer + פידבק
+
+### רציונל
+כפתור-הרענון של folder-watch היה overlay עגול צף ו**שקט לגמרי** — המשתמשת דיווחה שהוא "מרגיש מת". שתי בעיות:
+(1) מיקום לא-נייטיבי; (2) `doRescan` מלוגג רק בכשל, מתעלם מ-`{changed:N}`, וקליק-ראשון-בלי-observer רק לוכד
+baseline (`{changed:0}`) → בלי שינוי חיצוני, שום פידבק. הכפתור **עבד** (אומת: `store.rescan()` דרך ה-Proxy,
+calev חשף שינוי) — הבעיה הייתה UX/גילוי, לא פונקציונליות.
+
+### החלטה
+(א) הזרקת הכפתור ל-`.nav-buttons-container` של ה-file-explorer כ-`nav-action-button` נייטיבי (ליד פתק-חדש/
+תיקייה-חדשה), אייקון `lucide-refresh-cw`; (ב) פידבק על כל קליק — spin + `console.log('rescan: N changed')` +
+`window.Notice`. ה-overlay הצף מוסר. לוגיקת ה-watch עצמה לא נגעת.
+
+### ממצאי אביגיל (2 סבבים → READY)
+- אישרה שמבנה ה-DOM מחזיק: `.nav-header`/`.nav-buttons-container`/`.nav-action-button` נוצרים ע"י רכיב-header
+  `X2` + `addNavButton` ב-file-explorer view. `window.Notice` חשוף, `layout-change` תקף (8×).
+- 🔴→תוקן: keyframes `ow-spin` **כבר קיים** (index.html:44, loading-spinner) → reuse, לא redefine (מנע regression).
+- 🟡→תוקן: `setIcon` לא חשוף גלובלית → SVG inline של lucide-refresh-cw.
+
+### רעיונות שנדחו
+- **statusBar/ribbon anchor**: אין surface יציב בבאנדל המובייל בלי Plugin instance — ה-nav-buttons-container
+  הוא ה-anchor הנכון (זה שורת-הכלים שהמשתמשת הצביעה עליה).
+
 ## 2026-07-19 — folder-watch: תיקון addListener dispatch ב-Capacitor-shim (מחליף folder-refresh)
 
 ### רציונל
