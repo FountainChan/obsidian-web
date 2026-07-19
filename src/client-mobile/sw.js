@@ -19,6 +19,59 @@
 const BUILD_ID = '__OW_BUILD__';       // מוזרק: CF=build-assets sed; מקומי=server מזריק clientCacheBust
 const CACHE = 'ow-sw-' + BUILD_ID;
 
+// ── /_owres/ vault-resource serving — spike findings (§0.1, executor, before
+// implementation) — docs/plans/sw-vault-resources.md §3. The `/_owres/`
+// fetch handler itself lands in the next commit; recorded here first per the
+// brief's own commit split (Commit 1 = spikes, manual+probe).
+//
+// Empirical setup: playwright (bunx playwright, local chromium — no gui-host
+// available in this environment) headless against the real local dev server
+// (`bun index.js`), opening the actual mobile runtime at `/vault/<demoId>`
+// (a real local/OPFS vault, not a mock) and driving it through
+// `page.evaluate` + `fetch()` from the page context — i.e. exercising the
+// real SW, real fetch-event dispatch, real OPFS, not a synthetic harness.
+// Script: /tmp/sw-vault-spike/spike-owres.mjs (not committed — scratch, per
+// project convention, see e.g. /tmp/spike-observer*.js in the folder-refresh
+// walkthrough entry).
+//
+// Spike #1 — SW reads OPFS in its fetch handler? YES, confirmed. Inside a
+// live `fetch` event handler, `self.navigator.storage.getDirectory()` →
+// `getDirectoryHandle('vaults')` → `getDirectoryHandle(vaultId)` → walk →
+// `getFileHandle().getFile()` all resolved correctly and returned a real
+// `File` whose bytes matched what was written from the page — no permission
+// prompt, no separate grant needed (OPFS has no FS-Access-style permission
+// gate at all). This validates the entire premise of the unified design.
+//
+// Spike #2 — SW reads a folder-vault's handle from IndexedDB (incl.
+// permission)? PARTIAL / not fully testable here: mechanically, a
+// `FileSystemDirectoryHandle` retrieved from `folder-handle-store`'s
+// IndexedDB *can* be walked (`getDirectoryHandle`/`getFileHandle`) from
+// inside a SW — but this environment has no way to automate the real
+// `showDirectoryPicker()` native dialog (headless, no gui-host — a directory
+// picker isn't a `<input type=file>` chooser playwright can drive), so a
+// true real-folder end-to-end run wasn't possible here. The platform
+// constraint that decides this regardless of that gap: `queryPermission`/
+// `requestPermission` on a `FileSystemHandle` require a user-activated
+// Window context (spec) — a Service Worker has neither a Window nor
+// activation, so it cannot itself (re-)request the grant even if OPFS-style
+// direct access worked mechanically. → folder vaults use the RPC fallback
+// (§3ד, next-next commit): the SW asks the already-open page, which already
+// holds the permission-granted handle (`window.__owFolderRoot`, granted via
+// a real user gesture in `boot.js`'s `showGrantScreen`).
+//
+// Spike #3 — img + PDF + video/audio all load uniformly through `/_owres/`?
+// YES for the transport mechanism: the probe wrote a PNG, a PDF (magic
+// bytes `%PDF-1.4`), and a synthetic 2000-byte "mp4" into the same OPFS
+// vault and fetched all three through the (prototyped) `/_owres/<id>/<id>/
+// ...` URL — all three came back 200 with the correct `Content-Type` by
+// extension, and a `Range: bytes=0-99`/`bytes=1000-` request against the
+// "mp4" came back 206 with a correct `Content-Range`/`Content-Length` (and
+// the clamped-end behavior for an out-of-range `end`). One mechanism, same
+// code path, for every binary type — confirms the design's core premise.
+// (Real PDF.js rendering / video playback in the DOM is left to the
+// end-of-slice calev-heavy E2E pass — this probe validated the serving
+// layer the DOM consumers sit on top of.)
+
 self.addEventListener('install', (e) => { self.skipWaiting(); });   // ללא precache — cache-first ממלא לפי צריכה
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
