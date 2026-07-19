@@ -20,6 +20,11 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/client-mobile/icons/icon-192.png"/>
   <link rel="icon" type="image/png" sizes="32x32" href="/client-mobile/icons/favicon-32.png"/>
   <link href="/obsidian-mobile/app.css" type="text/css" rel="stylesheet"/>
+  <!-- overrides.css: מסך-רחב (720-899px) — צמצום .mobile-vault-chooser-content
+       + מיקום .mobile-onboarding-navbar סמוך לתוכן. path מוחלט (לא יחסי) כי
+       <base href="/"> קיים למעלה. חייב לבוא **אחרי** app.css (order+specificity
+       גוברים). ראה docs/plans/mobile-layout-wide.md (docs-repo) + overrides.css. -->
+  <link href="/client-mobile/overrides.css?v=1" type="text/css" rel="stylesheet"/>
   <style>
     #ow-loading {
       position: fixed; inset: 0; display: flex; flex-direction: column;
