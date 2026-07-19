@@ -95,6 +95,18 @@
        §3ג. חייב לפני boot.js כדי ש-window.__owSeedExampleVault יהיה קיים. -->
   <script src="/client-mobile/seed-example-vault.js?v=1"></script>
 
+  <!-- 3d. Deploy-config (docs/plans/deploy-config.md §3) — deploy-time config
+       (seedExampleContent/layout/plugins), loaded BEFORE boot.js so
+       window.__owConfig is ready when boot.js reads it. The marker below is
+       replaced with `<script>window.__owConfigInjected={...}</script>` at
+       build-time (CF: build-assets.sh) or serve-time (Node: runtime-server's
+       sendHtmlWithCacheBust) — it MUST precede the deploy-config.js tag,
+       otherwise the loader silently falls back to DEFAULTS (order is
+       critical, see deploy-config.js comment). No injection (local/no-config)
+       → marker stays a no-op comment → DEFAULTS alone, zero regression. -->
+  <!-- OW_CONFIG_INJECT -->
+  <script src="/client-mobile/deploy-config.js?v=1"></script>
+
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected
        DYNAMICALLY by boot.js after vault verification — same mechanism as
