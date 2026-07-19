@@ -17,7 +17,7 @@ Browser
 │   ├── boot.js
 │   └── shims/capacitor-shim.js  - 13 Capacitor plugins routed to /api/*
 └── vendor/ (extracted from Obsidian, never modified; gitignored)
-    ├── obsidian/          (desktop bundle)
+    ├── obsidian-desktop/  (desktop bundle)
     └── obsidian-mobile/   (mobile bundle, build-time patched)
 
 Server (src/server/)
@@ -42,7 +42,7 @@ runtimes that share its API:
 
 | Route | Bundle loaded | Adapter chosen | Shim layer | Use case |
 |---|---|---|---|---|
-| `/` | `vendor/obsidian/app.js` (desktop) | `FileSystemAdapter` via `original-fs` shim | `src/client/shims/*` (electron, original-fs, ipcRenderer, …) | Legacy fallback; desktop-class plugin compatibility (full Node API surface). |
+| `/` | `vendor/obsidian-desktop/app.js` (desktop) | `FileSystemAdapter` via `original-fs` shim | `src/client/shims/*` (electron, original-fs, ipcRenderer, …) | Legacy fallback; desktop-class plugin compatibility (full Node API surface). |
 | `/mobile` | `vendor/obsidian-mobile/app.js` (Android APK bundle) | `CapacitorAdapter` via `capacitor-shim.js` | `src/client-mobile/shims/capacitor-shim.js` + minimal node shims (path, url, os, crypto, …) | Preferred runtime. Uses Obsidian's mobile codepaths (no sync XHR, no Electron assumptions). Layout (mobile/desktop UI) chosen at boot via `__owPlatformOverrides`. |
 
 ```
@@ -51,7 +51,7 @@ Browser → server ─┤
                   └── /mobile   → src/client-mobile/index.html → mobile bundle + Capacitor shim
                         │
                         ├── share /api/*  (fs, watch, bootstrap, vaults, electron)
-                        └── share vendor/obsidian/* and vendor/obsidian-mobile/* static assets
+                        └── share vendor/obsidian-desktop/* and vendor/obsidian-mobile/* static assets
 ```
 
 **Default recommendation:** `/mobile`. It's lighter (3.6 MB bundle vs 7+ MB),
@@ -77,7 +77,7 @@ each adapter expects.
 - Bootstrap fetch is async: spinner renders immediately, Obsidian scripts injected dynamically after cache is ready.
 - Metadata indexing completes after serving `/worker.js` from the root URL.
 - File rename through the Obsidian UI works end-to-end.
-- `scripts/update-obsidian.js` downloads the latest official Obsidian release and regenerates `obsidian/`.
+- `scripts/update-obsidian-desktop.js` downloads the latest official Obsidian release and regenerates `obsidian-desktop/`.
 - `/starter` serves a wrapped Obsidian starter screen with recent vaults.
 - Vaults are tracked in a server-side registry and FS/watch requests are scoped by vault id.
 - `/api/bootstrap` returns electron IPC + `.obsidian/` tree + dirs cache in one shot (brotli ~6MB).
@@ -124,12 +124,12 @@ See `docs/investigations.md` for solved issues and debugging notes.
 ## Roadmap
 
 ### Phase 1 — boot and editing MVP (done)
-1. Load Obsidian's renderer without modifying `obsidian/app.js`.
+1. Load Obsidian's renderer without modifying `obsidian-desktop/app.js`.
 2. Verify that indexing completes and the editor pane renders a note.
 3. Click on a note in the file tree and confirm it opens.
 4. Edit a note and confirm it saves to disk on the server.
 5. Rename a file through the UI and confirm it persists to disk.
-6. Regenerate `obsidian/` from the latest official release.
+6. Regenerate `obsidian-desktop/` from the latest official release.
 
 ### Phase 2 — quality of life
 5. Silence noisy 404s in sync-http; treat ENOENT as a normal not-found.
@@ -532,12 +532,12 @@ Add a `docs/livesync.md` guide covering:
 | `src/client-mobile/` | mobile-runtime client (boot.js + capacitor shim + index.html for `/mobile`) |
 | `src/plugins/obsidian-web-layout/` | system-plugin: ribbon + commands to switch mobile/desktop layout |
 | `src/deployments/cloudflare/` | Cloudflare Workers deployment (Worker + Durable Object + build script) |
-| `vendor/obsidian/` | extracted desktop bundle, untouched |
+| `vendor/obsidian-desktop/` | extracted desktop bundle, untouched |
 | `vendor/obsidian-mobile/` | extracted mobile bundle, patched at build time (4 patches) |
 | `user-data/demo-vault/` | example vault shipped with the repo |
 | `user-data/registry.json` | recent-vaults registry (gitignored, runtime) |
 | `.tmp/` | build artifacts + intermediate (folder tracked, contents gitignored) |
-| `scripts/update-obsidian.js` | downloads asar, extracts desktop bundle to `vendor/obsidian/` |
+| `scripts/update-obsidian-desktop.js` | downloads asar, extracts desktop bundle to `vendor/obsidian-desktop/` |
 | `scripts/update-obsidian-mobile.js` | downloads APK, extracts mobile bundle, applies patches |
 | `scripts/patch-obsidian-mobile.js` | 4 regex patches exposing `__owPlatform`, `__owPlatformOverrides`, and the desktop vault-profile panel |
 | `test-vault/` | scratch vault for development |

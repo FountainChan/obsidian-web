@@ -11,7 +11,7 @@ const zlib = require('zlib');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const CACHE_DIR = path.join(PROJECT_ROOT, '.tmp', 'cache', 'obsidian-releases');
-const TARGET_DIR = path.join(PROJECT_ROOT, 'vendor', 'obsidian');
+const TARGET_DIR = path.join(PROJECT_ROOT, 'vendor', 'obsidian-desktop');
 const EXTRACT_WORKDIR = path.join(PROJECT_ROOT, '.tmp', 'obsidian-extract');
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/obsidianmd/obsidian-releases/releases';
 const USER_AGENT = 'obsidian-web-updater';
@@ -53,7 +53,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node scripts/update-obsidian.js [options]\n\nOptions:\n  --version <version>  Download a specific Obsidian version or tag, e.g. 1.12.7 or v1.12.7\n  --force              Re-download even if the cached archive already exists\n  --no-cache           Delete the downloaded .asar.gz and .asar after extraction\n  -h, --help           Show this help\n`);
+  console.log(`Usage: node scripts/update-obsidian-desktop.js [options]\n\nOptions:\n  --version <version>  Download a specific Obsidian version or tag, e.g. 1.12.7 or v1.12.7\n  --force              Re-download even if the cached archive already exists\n  --no-cache           Delete the downloaded .asar.gz and .asar after extraction\n  -h, --help           Show this help\n`);
 }
 
 function sleep(ms) {

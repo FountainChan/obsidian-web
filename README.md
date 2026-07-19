@@ -42,9 +42,9 @@ src/                         our source code
 
 vendor/                      extracted Obsidian bundles (gitignored)
 ├── obsidian-mobile/         mobile renderer (with build-time patches) — the only renderer in use
-├── obsidian/                legacy desktop renderer — vestigial, no longer served by the
+├── obsidian-desktop/        legacy desktop renderer — vestigial, no longer served by the
 │                             server (routes removed in collapse-desktop); kept only because
-│                             scripts/update-obsidian.js still exists (see Notes)
+│                             scripts/update-obsidian-desktop.js still exists (see Notes)
 └── Obsidian.AppImage        source binary
 
 user-data/                   user-facing data
@@ -54,7 +54,7 @@ user-data/                   user-facing data
 .tmp/                        intermediate / build artifacts (folder tracked,
                              contents gitignored via internal .gitignore)
 scripts/                     build tooling (update-obsidian-mobile, patch-obsidian-mobile;
-                             update-obsidian.js is vestigial, see Notes)
+                             update-obsidian-desktop.js is vestigial, see Notes)
 ```
 
 > **Note**: `src/client/` (the desktop runtime) was removed in the `collapse-desktop` slice —
@@ -92,7 +92,7 @@ its own, but existing bookmarks/links still land you on the app instead of a 404
 
 ### Mobile bundle (`vendor/obsidian-mobile/`) — the only runtime
 
-`/` and `/mobile` are both served by the mobile runtime, which needs the Obsidian Android APK bundle extracted into `vendor/obsidian-mobile/`. Like the (now vestigial) `vendor/obsidian/`, this directory is gitignored and downloaded on demand:
+`/` and `/mobile` are both served by the mobile runtime, which needs the Obsidian Android APK bundle extracted into `vendor/obsidian-mobile/`. Like the (now vestigial) `vendor/obsidian-desktop/`, this directory is gitignored and downloaded on demand:
 
 ```bash
 # extract vendor/obsidian-mobile/ from the latest Android APK release
@@ -211,17 +211,17 @@ The Node.js server (`src/server/`) can be deployed to any Linux box. A typical s
 - The default vault is `user-data/demo-vault/`.
 - Do not bind the server to a public IP without a tunnel or auth layer in front.
 - Current architecture and roadmap are in `PLAN.md`.
-- `vendor/obsidian/` and `scripts/update-obsidian.js` (the legacy desktop renderer + its
+- `vendor/obsidian-desktop/` and `scripts/update-obsidian-desktop.js` (the legacy desktop renderer + its
   downloader) are **vestigial** — the server no longer serves any route from them (removed
   in the `collapse-desktop` slice). They are left in place rather than deleted; if you don't
-  already have `vendor/obsidian/` populated, you don't need it — everything now runs on
+  already have `vendor/obsidian-desktop/` populated, you don't need it — everything now runs on
   `vendor/obsidian-mobile/`.
 
 ## Disclaimer
 
 This is an **educational proof-of-concept** exploring how Electron-based apps can run in a standard browser. It is not affiliated with, endorsed by, or associated with [Obsidian](https://obsidian.md) or Dynalist Inc.
 
-This repository does **not** include Obsidian's source code. The `vendor/obsidian/` and `vendor/obsidian-mobile/` directories are gitignored — users must download Obsidian's renderer themselves using the provided setup scripts. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
+This repository does **not** include Obsidian's source code. The `vendor/obsidian-desktop/` and `vendor/obsidian-mobile/` directories are gitignored — users must download Obsidian's renderer themselves using the provided setup scripts. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
 
 If the Obsidian team has any concerns about this project, please [open an issue](https://github.com/MusiCode1/obsidian-web/issues) and we will address them promptly.
 
