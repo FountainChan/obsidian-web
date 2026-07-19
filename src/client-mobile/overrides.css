@@ -31,6 +31,22 @@
  *     בצמצום נוסף; הבעיה הייתה רק ה-navbar החיצוני-לו.
  */
 
+/*
+ * ── folder-refresh button spin (docs/plans/folder-refresh-toolbar.md §3ג) ──
+ * `.ow-folder-refresh-btn` is injected into the file-explorer's own
+ * nav-buttons-container (boot.js, installFolderRefreshWatch). While a rescan
+ * is in flight the button gets `.is-spinning` — this rotates its icon.
+ *
+ * REUSE, no new @keyframes: `ow-spin` is already defined in index.html:44
+ * for the boot loading-spinner. @keyframes names are document-global —
+ * redefining `ow-spin` here would silently override that spinner too
+ * (avigail finding 2, regression risk). The rotate-360 shape is identical,
+ * so we just reference the existing name.
+ */
+.ow-folder-refresh-btn.is-spinning svg {
+  animation: ow-spin 0.6s linear infinite;
+}
+
 @media (min-width: 720px) {
   /* מסך vault-chooser ("Obsidian" / רשימת vaults) — צמצום מ-800 ל-480 כדי
      שהשורות (Setup Sync / Create new vault / vaults קיימים) לא יפרשו מקצה

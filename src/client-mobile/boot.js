@@ -757,13 +757,42 @@ const MOBILE_SCRIPTS = [
       };
     }
 
+    // ── feedback helpers (docs/plans/folder-refresh-toolbar.md §0/§3ב) ───────
+    // The button existed before (folder-watch) but gave zero feedback: click
+    // → rescan() ran silently, {changed:N} was discarded, and doRescan only
+    // ever logged on *failure*. First click without an observer only ever
+    // captures a {changed:0} baseline, so nothing visible happens — the
+    // button "feels dead" even when it works. Fix: always log the result,
+    // spin the icon while in flight, and surface a Notice when available
+    // (window.Notice — confirmed exposed by executor spike §0.1ד, not a
+    // no-op fallback needed).
+    function setSpin(on) {
+      var btns = document.querySelectorAll('.ow-folder-refresh-btn');
+      for (var i = 0; i < btns.length; i++) {
+        if (on) btns[i].classList.add('is-spinning');
+        else btns[i].classList.remove('is-spinning');
+      }
+    }
+    function owNotice(n) {
+      // window.Notice may be absent in odd embeddings — spin+log always work
+      // regardless (brief §6 risk: "setIcon/Notice לא חשופים").
+      if (typeof window.Notice !== 'function') return;
+      new window.Notice(n ? ('נמצאו ' + n + ' שינויים') : 'אין שינויים חדשים');
+    }
+
     var rescanning = false;
     function doRescan() {
       if (rescanning || typeof fs.rescan !== 'function') return;
       rescanning = true;
+      setSpin(true);
       fs.rescan()
+        .then(function (r) {
+          var n = (r && r.changed) || 0;
+          console.log('[ow] rescan: ' + n + ' changed');
+          owNotice(n);
+        })
         .catch(function (e) { console.warn('[ow] folder rescan failed', e); })
-        .then(function () { rescanning = false; });
+        .then(function () { rescanning = false; setSpin(false); });
     }
 
     // fallback trigger — only when there's no observer to do this for us.
@@ -776,27 +805,74 @@ const MOBILE_SCRIPTS = [
       document.addEventListener('visibilitychange', debouncedRescan);
     }
 
-    // manual refresh button — always shown, fixed-position overlay like the
-    // other boot.js buttons (installDemoVaultButton/showGrantScreen above) —
-    // no existing statusBar/ribbon surface in the mobile bundle is a safe,
-    // stable anchor to hook into without touching vendor internals, so this
-    // follows the same pattern.
-    owWhenAppReady(function () {
-      if (document.querySelector('.ow-folder-refresh-btn')) return;
-      var btn = document.createElement('button');
-      btn.className = 'ow-folder-refresh-btn';
-      btn.type = 'button';
-      btn.title = 'רענן — בדוק שינויים חיצוניים בתיקייה';
-      btn.textContent = '⟳';
-      btn.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;' +
-        'width:40px;height:40px;border:none;border-radius:50%;background:#7f6df2;' +
-        'color:#fff;cursor:pointer;font-size:18px;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.3);';
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        doRescan();
-      });
-      document.body.appendChild(btn);
+    // ── manual refresh button — injected into the file-explorer's own
+    // nav-buttons-container (docs/plans/folder-refresh-toolbar.md §0.1 spike,
+    // executor, Chromium headless against the real 1.12.7 mobile bundle) ────
+    // §0.1א (DOM): `.workspace-leaf-content[data-type="file-explorer"]
+    // .nav-header .nav-buttons-container` exists and holds 5 native
+    // `.nav-action-button` siblings (New note/New folder/Change sort
+    // order/Auto-reveal/Expand all). Exact markup, verified via outerHTML:
+    // `<div class="clickable-icon nav-action-button" aria-label="...">`
+    // wrapping an inline `<svg class="svg-icon lucide-<name>" .../>` — a
+    // `<div>`, not a `<button>` (matches the brief's §3א pseudocode). We
+    // clone that shape exactly instead of the old fixed-position overlay.
+    // §0.1ג (icon): `window.setIcon`/`obsidian.setIcon` are NOT exposed
+    // globally in this bundle (confirmed empirically — `typeof
+    // window.setIcon === 'undefined'`) → inline SVG. `OW_REFRESH_SVG` below
+    // uses the *exact* path data lucide-refresh-cw resolves to in this
+    // bundle's icon table (grepped from app.js, not the generic/newer lucide
+    // shape — bundled lucide versions drift), so it matches the sibling
+    // icons pixel-for-pixel.
+    // §0.1ב (timing/re-mount): the file-explorer view mounts after boot and
+    // can remount (layout-change fires 8x in this bundle — confirmed a real,
+    // subscribable `app.workspace` event via `workspace.trigger('layout-
+    // change')` in the spike). `mountRefreshButton` is idempotent (dedupe via
+    // `.querySelector('.ow-folder-refresh-btn')` per bar) so it's safe to
+    // call both once via `owWhenAppReady` (first mount) and again on every
+    // `layout-change` (recovers from remounts) without ever duplicating.
+    var OW_REFRESH_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" ' +
+      'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round" class="svg-icon lucide-refresh-cw">' +
+      '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>' +
+      '<path d="M21 3v5h-5"></path>' +
+      '<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>' +
+      '<path d="M8 16H3v5"></path></svg>';
+
+    function mountRefreshButton() {
+      var bars = document.querySelectorAll(
+        '.workspace-leaf-content[data-type="file-explorer"] .nav-buttons-container');
+      for (var i = 0; i < bars.length; i++) {
+        var bar = bars[i];
+        if (bar.querySelector('.ow-folder-refresh-btn')) continue;   // dedupe
+        var btn = document.createElement('div');   // nav-action-button is a div in this bundle
+        btn.className = 'clickable-icon nav-action-button ow-folder-refresh-btn';
+        btn.setAttribute('aria-label', 'רענן — שינויים חיצוניים בתיקייה');
+        btn.innerHTML = OW_REFRESH_SVG;
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          doRescan();
+        });
+        bar.appendChild(btn);
+      }
+    }
+
+    // guard מקומי (owWaitForWorkspace pattern, vault-note-deeplink finding,
+    // boot.js:1037-1053): window.app.vault יכול להיות קיים לפני
+    // window.app.workspace (App.onload אסינכרוני) — owWhenAppReady לבד לא
+    // מבטיח את זה. owWaitForWorkspace עצמו מוגדר scope-מקומי במקום אחר בקובץ
+    // (לא נגיש מכאן) — פולינג-מקומי זהה, לא מגדיר מחדש את ה-helper המקורי.
+    owWhenAppReady(function (app) {
+      function whenWorkspaceReady(tries) {
+        if (app.workspace) {
+          mountRefreshButton();
+          app.workspace.on('layout-change', mountRefreshButton);
+          return;
+        }
+        if ((tries || 0) >= 160) return;   // timeout שקט — עקבי עם owWhenAppReady/owWaitForWorkspace
+        setTimeout(function () { whenWorkspaceReady((tries || 0) + 1); }, 50);
+      }
+      whenWorkspaceReady(0);
     });
   }
 
