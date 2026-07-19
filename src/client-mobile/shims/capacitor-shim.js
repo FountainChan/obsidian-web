@@ -624,7 +624,7 @@
   const OPFS_PATH_METHODS = ['readFile', 'writeFile', 'appendFile', 'deleteFile', 'mkdir', 'rmdir', 'readdir', 'stat', 'getUri'];
 
   function wrapOpfsWithFullPath(store) {
-    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, setTimes, trash, ...)
+    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, rescan, setTimes, trash, ...)
     for (const m of OPFS_PATH_METHODS) {
       if (typeof store[m] !== 'function') continue;
       wrapped[m] = (opts) => store[m](Object.assign({}, opts, { path: fullPath(opts) }));
@@ -656,14 +656,16 @@
   // with a pluggable getRoot that returns the picked FileSystemDirectoryHandle
   // (window.__owFolderRoot, set by boot.js's permission-gated verify step)
   // instead of navigator.storage.getDirectory()/vaults/<id>. See
-  // docs/plans/folder-vault.md §3ה.
+  // docs/plans/folder-vault.md §3ה. `isFolder: true` additionally gates
+  // OpfsStore's external-change watch (docs/plans/folder-watch.md §2) —
+  // 'local' (OPFS) vaults must stay a watch no-op (DoD#4).
   function fsBackend() {
     const t = window.__owVaultType;
     if (t === 'local' || t === 'folder') {
       if (!window.__owLocalFs) {
         const getRoot = t === 'folder' ? (async () => window.__owFolderRoot) : undefined;
         window.__owLocalFs = wrapOpfsWithFullPath(
-          window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId(), { getRoot }));
+          window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId(), { getRoot, isFolder: t === 'folder' }));
       }
       return window.__owLocalFs;
     }

@@ -728,6 +728,78 @@ const MOBILE_SCRIPTS = [
     });
   }
 
+  // ── folder-vault external-change refresh (docs/plans/folder-watch.md §2/§3ד,
+  // reused from slice/folder-refresh, which already verified DoD#3/4/5 there —
+  // the retarget here (folder-watch) is the addListener capture itself, see
+  // capacitor-shim.js + opfs-store.js) ──────────────────────────────────────
+  // folder vaults (a real directory) can change from outside the browser —
+  // another app, a sync client, another tab/device on the same directory.
+  // OpfsStore (opfs-store.js) wires FileSystemObserver where supported and
+  // always exposes rescan() as the manual/fallback path — this installs the
+  // user-facing side: a manual refresh button (always shown — cheap even
+  // when the observer IS active, covers edge cases like {recursive} not
+  // fully supported) and, only when FileSystemObserver isn't supported, a
+  // visibilitychange-triggered auto-rescan (debounced ~500ms) so switching
+  // back to the tab/app picks up external edits without a manual click.
+  // VAULT_TYPE==='folder' guard only (DoD#4) — 'local' (OPFS) vaults can
+  // never change externally, must stay a no-op.
+  function installFolderRefreshWatch() {
+    if (VAULT_TYPE !== 'folder') return;
+    if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.Filesystem) return;
+    var fs = window.Capacitor.Plugins.Filesystem;
+    var hasObserver = typeof self !== 'undefined' && 'FileSystemObserver' in self;
+
+    function debounce(fn, ms) {
+      var t = null;
+      return function () {
+        if (t) clearTimeout(t);
+        t = setTimeout(fn, ms);
+      };
+    }
+
+    var rescanning = false;
+    function doRescan() {
+      if (rescanning || typeof fs.rescan !== 'function') return;
+      rescanning = true;
+      fs.rescan()
+        .catch(function (e) { console.warn('[ow] folder rescan failed', e); })
+        .then(function () { rescanning = false; });
+    }
+
+    // fallback trigger — only when there's no observer to do this for us.
+    // visibilitychange, not window focus — more resilient: fires reliably on
+    // tab-switch/app-resume, unlike focus which some mobile browsers skip.
+    if (!hasObserver) {
+      var debouncedRescan = debounce(function () {
+        if (!document.hidden) doRescan();
+      }, 500);
+      document.addEventListener('visibilitychange', debouncedRescan);
+    }
+
+    // manual refresh button — always shown, fixed-position overlay like the
+    // other boot.js buttons (installDemoVaultButton/showGrantScreen above) —
+    // no existing statusBar/ribbon surface in the mobile bundle is a safe,
+    // stable anchor to hook into without touching vendor internals, so this
+    // follows the same pattern.
+    owWhenAppReady(function () {
+      if (document.querySelector('.ow-folder-refresh-btn')) return;
+      var btn = document.createElement('button');
+      btn.className = 'ow-folder-refresh-btn';
+      btn.type = 'button';
+      btn.title = 'רענן — בדוק שינויים חיצוניים בתיקייה';
+      btn.textContent = '⟳';
+      btn.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;' +
+        'width:40px;height:40px;border:none;border-radius:50%;background:#7f6df2;' +
+        'color:#fff;cursor:pointer;font-size:18px;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.3);';
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        doRescan();
+      });
+      document.body.appendChild(btn);
+    });
+  }
+
   setStatus('Verifying vault...');
 
   // אמת שה-vault קיים: local → OPFS getDirectoryHandle (idempotent, אין
@@ -871,6 +943,11 @@ const MOBILE_SCRIPTS = [
       // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
       // חולצה ל-injectMobileScripts() למעלה — נגישה גם לזרימת ה-no-vault.
       injectMobileScripts();
+
+      // folder-vault external-change refresh (docs/plans/folder-watch.md §2) —
+      // VAULT_TYPE guard is inside installFolderRefreshWatch itself (no-op
+      // ל-local/server).
+      installFolderRefreshWatch();
 
       // ── שם-כספת מוצג מה-registry (docs/plans/vault-name-display.md §2/§3) ──
       // לכספת OPFS (local/folder) עם רשומת-registry, __owV.name הוא השם
