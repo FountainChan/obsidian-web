@@ -32,6 +32,17 @@ if [[ ! -f "$MAIN_DIR/vendor/obsidian-mobile/app.js" ]]; then
   exit 1
 fi
 
+# ── deploy-config (docs/plans/deploy-config.md §3) — single source of truth
+# for which system plugins ship/are-enabled and for window.__owConfigInjected
+# below. Committed to the repo (not gitignored), so it is always present at
+# build time — unlike vendor/, no existence-fallback needed here.
+CONFIG_PATH="$MAIN_DIR/src/config/deploy-config.json"
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo ""
+  echo "ERROR: $CONFIG_PATH not found — required for deploy config (plugins + injected config)."
+  exit 1
+fi
+
 # ── Clean and recreate public/ ─────────────────────────────────────────────
 rm -rf "$PUBLIC_DIR"
 mkdir -p "$PUBLIC_DIR"
@@ -79,6 +90,26 @@ BUST=$(date +%s)
 echo "  cache buster: $BUST"
 sed -i "s|/client-mobile/\([^\"]*\)?v=[^\"&]*\"|/client-mobile/\1?v=${BUST}\"|g" "$PUBLIC_DIR/index.html"
 
+# ── deploy-config inject (docs/plans/deploy-config.md §3ב) — replaces the
+# <!-- OW_CONFIG_INJECT --> marker (see index.html comment) with a literal
+# <script>window.__owConfigInjected={...}</script> holding the full parsed
+# config.json. Must precede the deploy-config.js tag — it already does in the
+# source index.html, this step only substitutes the marker in place. Uses
+# node -e (not sed) because the JSON payload can contain characters that
+# would need escaping in a sed replacement.
+echo "  injecting deploy-config (window.__owConfigInjected)..."
+CONFIG_PATH="$CONFIG_PATH" HTML_PATH="$PUBLIC_DIR/index.html" node -e '
+  const fs = require("fs");
+  const config = JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, "utf8"));
+  const html = fs.readFileSync(process.env.HTML_PATH, "utf8");
+  const marker = "<!-- OW_CONFIG_INJECT -->";
+  if (!html.includes(marker)) {
+    throw new Error("OW_CONFIG_INJECT marker not found in " + process.env.HTML_PATH);
+  }
+  const snippet = "<script>window.__owConfigInjected=" + JSON.stringify(config) + "</script>";
+  fs.writeFileSync(process.env.HTML_PATH, html.replace(marker, snippet));
+'
+
 # ── Service Worker (offline + asset-cache — docs/plans/service-worker-offline.md
 # §3ד) — copied to the public root so its scope covers the whole app. BUST is
 # the same timestamp already used for ?v= above, so a new deploy = a new SW
@@ -94,32 +125,53 @@ sed -i "s/__OW_BUILD__/${BUST}/g" "$PUBLIC_DIR/sw.js"   # BUST = ה-timestamp ש
 # back to fetching these static files when the API route 404s.
 echo "  building system-plugins/ (static)..."
 
-# system-plugins/ — layout-switcher (קיים) + LiveSync (חדש, מותקן-מכובה)
-mkdir -p "$PUBLIC_DIR/system-plugins/obsidian-web-layout"
-cp "$MAIN_DIR/src/plugins/obsidian-web-layout/"* "$PUBLIC_DIR/system-plugins/obsidian-web-layout/"
-LAYOUT_VER=$(node -p "require('$MAIN_DIR/src/plugins/obsidian-web-layout/manifest.json').version")
+# config.plugins.*.install/enabled (docs/plans/deploy-config.md §3ג) — `install`
+# gates whether the plugin ships at all (files + manifest entry); `enabled`
+# becomes the manifest's `enabled` flag, which seed-system-plugins.js reads to
+# decide installed-but-disabled vs auto-enabled-on-seed. Defaults in
+# src/config/deploy-config.json mirror the old hardcoded values 1:1 (install:
+# true/true, enabled: false/true) — zero regression when the file is unchanged.
+LAYOUT_INSTALL=$(node -p "require('$CONFIG_PATH').plugins['obsidian-web-layout'].install")
+LAYOUT_ENABLED=$(node -p "require('$CONFIG_PATH').plugins['obsidian-web-layout'].enabled")
+LS_INSTALL=$(node -p "require('$CONFIG_PATH').plugins['obsidian-livesync'].install")
+LS_ENABLED=$(node -p "require('$CONFIG_PATH').plugins['obsidian-livesync'].enabled")
 
-# LiveSync — מותקן-מכובה. finding 1: `if node ...; then` בולע exit(1) → set -e לא מפיל.
+# system-plugins/ — layout-switcher, gated by config.plugins.obsidian-web-layout.install
+LAYOUT_VER=""
+if [[ "$LAYOUT_INSTALL" == "true" ]]; then
+  mkdir -p "$PUBLIC_DIR/system-plugins/obsidian-web-layout"
+  cp "$MAIN_DIR/src/plugins/obsidian-web-layout/"* "$PUBLIC_DIR/system-plugins/obsidian-web-layout/"
+  LAYOUT_VER=$(node -p "require('$MAIN_DIR/src/plugins/obsidian-web-layout/manifest.json').version")
+else
+  echo "  config: plugins.obsidian-web-layout.install=false — skipping layout-switcher"
+fi
+
+# LiveSync — gated by config.plugins.obsidian-livesync.install. finding 1: `if node ...; then` בולע exit(1) → set -e לא מפיל.
 LS_PIN="${SEED_LIVESYNC_VERSION:-}"      # ריק=latest; נעילת-גרסה אופציונלית
 LS_VERSION=""; LS_FILES=""              # finding 3: init לפני set -u
-if node "$MAIN_DIR/scripts/install-livesync.js" ${LS_PIN:+--version "$LS_PIN"}; then
-  LS_SRC="$MAIN_DIR/vendor/plugins/obsidian-livesync"
-  if [[ -f "$LS_SRC/main.js" && -f "$LS_SRC/manifest.json" ]]; then
-    DEST="$PUBLIC_DIR/system-plugins/obsidian-livesync"; mkdir -p "$DEST"
-    cp "$LS_SRC/main.js" "$LS_SRC/manifest.json" "$DEST/"          # finding 4: מפורש, לא *.json (מדלג data.json)
-    LS_FILES='["main.js","manifest.json"]'
-    if [[ -f "$LS_SRC/styles.css" ]]; then cp "$LS_SRC/styles.css" "$DEST/"; LS_FILES='["main.js","manifest.json","styles.css"]'; fi
-    LS_VERSION=$(node -p "require('$LS_SRC/manifest.json').version")
+if [[ "$LS_INSTALL" == "true" ]]; then
+  if node "$MAIN_DIR/scripts/install-livesync.js" ${LS_PIN:+--version "$LS_PIN"}; then
+    LS_SRC="$MAIN_DIR/vendor/plugins/obsidian-livesync"
+    if [[ -f "$LS_SRC/main.js" && -f "$LS_SRC/manifest.json" ]]; then
+      DEST="$PUBLIC_DIR/system-plugins/obsidian-livesync"; mkdir -p "$DEST"
+      cp "$LS_SRC/main.js" "$LS_SRC/manifest.json" "$DEST/"          # finding 4: מפורש, לא *.json (מדלג data.json)
+      LS_FILES='["main.js","manifest.json"]'
+      if [[ -f "$LS_SRC/styles.css" ]]; then cp "$LS_SRC/styles.css" "$DEST/"; LS_FILES='["main.js","manifest.json","styles.css"]'; fi
+      LS_VERSION=$(node -p "require('$LS_SRC/manifest.json').version")
+    fi
+  else
+    echo "  WARN: obsidian-livesync download failed — skipping preinstall (build continues, layout-switcher only)"
   fi
 else
-  echo "  WARN: obsidian-livesync download failed — skipping preinstall (build continues, layout-switcher only)"
+  echo "  config: plugins.obsidian-livesync.install=false — skipping LiveSync"
 fi
 
 # manifest.json — finding 2: env מיוצא inline לפני node -e (אחרת process.env undefined → abort)
-LAYOUT_VER="$LAYOUT_VER" LS_VERSION="$LS_VERSION" LS_FILES="$LS_FILES" OUT="$PUBLIC_DIR/system-plugins/manifest.json" node -e '
+LAYOUT_VER="$LAYOUT_VER" LAYOUT_ENABLED="$LAYOUT_ENABLED" LS_VERSION="$LS_VERSION" LS_FILES="$LS_FILES" LS_ENABLED="$LS_ENABLED" OUT="$PUBLIC_DIR/system-plugins/manifest.json" node -e '
   const fs=require("fs");
-  const plugins=[{id:"obsidian-web-layout",version:process.env.LAYOUT_VER,files:["main.js","manifest.json"],enabled:true}];
-  if (process.env.LS_VERSION) plugins.push({id:"obsidian-livesync",version:process.env.LS_VERSION,files:JSON.parse(process.env.LS_FILES),enabled:false});
+  const plugins=[];
+  if (process.env.LAYOUT_VER) plugins.push({id:"obsidian-web-layout",version:process.env.LAYOUT_VER,files:["main.js","manifest.json"],enabled:process.env.LAYOUT_ENABLED === "true"});
+  if (process.env.LS_VERSION) plugins.push({id:"obsidian-livesync",version:process.env.LS_VERSION,files:JSON.parse(process.env.LS_FILES),enabled:process.env.LS_ENABLED === "true"});
   fs.writeFileSync(process.env.OUT, JSON.stringify({plugins}));
 '
 

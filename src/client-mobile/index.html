@@ -20,6 +20,11 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/client-mobile/icons/icon-192.png"/>
   <link rel="icon" type="image/png" sizes="32x32" href="/client-mobile/icons/favicon-32.png"/>
   <link href="/obsidian-mobile/app.css" type="text/css" rel="stylesheet"/>
+  <!-- overrides.css: מסך-רחב (720-899px) — צמצום .mobile-vault-chooser-content
+       + מיקום .mobile-onboarding-navbar סמוך לתוכן. path מוחלט (לא יחסי) כי
+       <base href="/"> קיים למעלה. חייב לבוא **אחרי** app.css (order+specificity
+       גוברים). ראה docs/plans/mobile-layout-wide.md (docs-repo) + overrides.css. -->
+  <link href="/client-mobile/overrides.css?v=1" type="text/css" rel="stylesheet"/>
   <style>
     #ow-loading {
       position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -94,6 +99,18 @@
        מקומי מדלג, 404). לא נוגע ב-.obsidian/ — ראה docs/plans/cf-mobile-seed.md
        §3ג. חייב לפני boot.js כדי ש-window.__owSeedExampleVault יהיה קיים. -->
   <script src="/client-mobile/seed-example-vault.js?v=1"></script>
+
+  <!-- 3d. Deploy-config (docs/plans/deploy-config.md §3) — deploy-time config
+       (seedExampleContent/layout/plugins), loaded BEFORE boot.js so
+       window.__owConfig is ready when boot.js reads it. The marker below is
+       replaced with `<script>window.__owConfigInjected={...}</script>` at
+       build-time (CF: build-assets.sh) or serve-time (Node: runtime-server's
+       sendHtmlWithCacheBust) — it MUST precede the deploy-config.js tag,
+       otherwise the loader silently falls back to DEFAULTS (order is
+       critical, see deploy-config.js comment). No injection (local/no-config)
+       → marker stays a no-op comment → DEFAULTS alone, zero regression. -->
+  <!-- OW_CONFIG_INJECT -->
+  <script src="/client-mobile/deploy-config.js?v=1"></script>
 
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected

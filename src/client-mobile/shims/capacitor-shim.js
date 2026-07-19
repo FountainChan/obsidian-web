@@ -624,7 +624,7 @@
   const OPFS_PATH_METHODS = ['readFile', 'writeFile', 'appendFile', 'deleteFile', 'mkdir', 'rmdir', 'readdir', 'stat', 'getUri'];
 
   function wrapOpfsWithFullPath(store) {
-    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, setTimes, trash, ...)
+    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, rescan, setTimes, trash, ...)
     for (const m of OPFS_PATH_METHODS) {
       if (typeof store[m] !== 'function') continue;
       wrapped[m] = (opts) => store[m](Object.assign({}, opts, { path: fullPath(opts) }));
@@ -656,14 +656,16 @@
   // with a pluggable getRoot that returns the picked FileSystemDirectoryHandle
   // (window.__owFolderRoot, set by boot.js's permission-gated verify step)
   // instead of navigator.storage.getDirectory()/vaults/<id>. See
-  // docs/plans/folder-vault.md §3ה.
+  // docs/plans/folder-vault.md §3ה. `isFolder: true` additionally gates
+  // OpfsStore's external-change watch (docs/plans/folder-watch.md §2) —
+  // 'local' (OPFS) vaults must stay a watch no-op (DoD#4).
   function fsBackend() {
     const t = window.__owVaultType;
     if (t === 'local' || t === 'folder') {
       if (!window.__owLocalFs) {
         const getRoot = t === 'folder' ? (async () => window.__owFolderRoot) : undefined;
         window.__owLocalFs = wrapOpfsWithFullPath(
-          window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId(), { getRoot }));
+          window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId(), { getRoot, isFolder: t === 'folder' }));
       }
       return window.__owLocalFs;
     }
@@ -946,6 +948,39 @@
       return Promise.resolve().then(() => method.call(plugin, options || {}));
     };
 
+    // ── nativeCallback override (docs/plans/folder-watch.md §3א חלק 2) ──────
+    // Capacitor's registerPlugin Proxy (app.js) calls this DIRECTLY (in-memory
+    // JS reference — not via the postToNative/androidBridge JSON bridge) for
+    // any method whose PluginHeaders entry declares rtype:'callback' (see
+    // `cm()` below) — forwarding BOTH args (options, callback). Without this
+    // override, app.js falls through to native-bridge.js's own
+    // `cap.nativeCallback`, which round-trips through `cap.toNative()` →
+    // postToNative → our routeNativeCall (single-arg, one-shot resolve —
+    // wrong shape for a persistent event-listener callback) and additionally
+    // never forwards the real callback function reference at all (only
+    // options are JSON-serialized). This mirrors the nativePromise override
+    // above, just for the 2-arg (options, callback) rtype.
+    const _origNC = cap.nativeCallback;
+    cap.nativeCallback = (pluginName, methodName, options, callback) => {
+      const plugin = plugins[pluginName];
+      if (!plugin) return _origNC ? _origNC(pluginName, methodName, options, callback) : undefined;
+      const method = plugin[methodName];
+      if (typeof method !== 'function') return _origNC ? _origNC(pluginName, methodName, options, callback) : undefined;
+      // spike §0.1 empirical finding (real Obsidian, not self-test): the
+      // registerPlugin Proxy's addListenerFunction forwards `{eventName}` as
+      // the options object (`c.nativeCallback(plugin, 'addListener',
+      // {eventName:'change'}, cb)`), NOT the bare eventName string. Our
+      // plugin methods' existing contract (HttpFilesystem.addListener,
+      // OpfsStore.addListener) takes a plain eventName STRING as their first
+      // arg — matches 33 folder-refresh self-test assertions + the merged
+      // opfs-store self-test, so unwrap here instead of changing that
+      // contract.
+      if (methodName === 'addListener' && options && typeof options.eventName === 'string') {
+        return method.call(plugin, options.eventName, callback);
+      }
+      return method.call(plugin, options || {}, callback);
+    };
+
     cap.isPluginAvailable = (name) => name in plugins;
 
     // convertFileSrc: large binary files (>5MB) fetched via HTTP URL
@@ -968,6 +1003,9 @@
     // rtype 'promise' = single-arg (options obj) → nativePromise
     // rtype 'callback' = two-arg (options, callback) → nativeCallback
     function pm(name) { return { name, rtype: 'promise' }; }
+    // docs/plans/folder-watch.md §3א חלק 1 — addListener needs the real
+    // (options, callback) 2-arg shape, not the single-arg promise shape.
+    function cm(name) { return { name, rtype: 'callback' }; }
 
     cap.PluginHeaders = [
       {
@@ -988,7 +1026,7 @@
           pm('deleteFile'), pm('mkdir'), pm('rmdir'),
           pm('readdir'), pm('stat'), pm('rename'), pm('copy'),
           pm('getUri'), pm('startWatch'), pm('stopWatch'),
-          pm('watchAndStatAll'), pm('addListener'),
+          pm('watchAndStatAll'), cm('addListener'),
           pm('requestPermissions'), pm('requestPerms'), pm('checkPerms'),
           pm('choose'), pm('trash'), pm('setTimes'),
           pm('verifyIcloud'), pm('open'),

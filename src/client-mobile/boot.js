@@ -110,6 +110,36 @@ const MOBILE_SCRIPTS = [
     return;   // מנווטים החוצה — אין מה לעשות יותר בטיק הזה
   }
 
+  // ── Demo vault — lazy create-if-missing (seed-demo §3ג) ────────────────────
+  // Fixed-id demo vault (window.__owConfig.demoVault.id, default
+  // '0000demo0000demo') — NOT registered ahead of time (brief §0 decision 2:
+  // registry stays empty for a brand-new user → native onboarding screen,
+  // not the vault-chooser, DoD#3). ensureDemo() is the only thing that ever
+  // writes the Demo's registry entry — called here for the share-link
+  // (/vault/<demoId>, DoD#5) and from the starter-screen button (installed
+  // in a later commit, DoD#4). Idempotent: get(DEMO_ID) truthy on repeat
+  // visits → no-op (the fixed id, not a fresh uuid, is what makes this work
+  // — local-vault-registry.js create() opts.id, seed-demo §3א).
+  var DEMO_ID = (window.__owConfig && window.__owConfig.demoVault && window.__owConfig.demoVault.id) || '0000demo0000demo';
+  function ensureDemo() {
+    // ES5 guard, avigail round-2 fix (precedence bug in the brief's draft
+    // pseudocode `!d.enabled ?? true`, which isn't even valid without `??`):
+    // `d && d.enabled === false` — explicit opt-out only; missing config or
+    // missing `enabled` key both default to "on".
+    var d = window.__owConfig && window.__owConfig.demoVault;
+    if (d && d.enabled === false) return null;
+    if (window.__owLocalVaults && !window.__owLocalVaults.get(DEMO_ID)) {
+      window.__owLocalVaults.create('Demo', { id: DEMO_ID });
+    }
+    return DEMO_ID;
+  }
+
+  // /vault/<demoId> — share-link (DoD#5): create-if-missing on first visit;
+  // repeat visits find the registry entry already there (idempotent, no-op).
+  // Once created, VAULT_TYPE below resolves to 'local' (registry lookup
+  // succeeds) instead of falling back to 'server' for an unknown id.
+  if (VAULT_ID === DEMO_ID) ensureDemo();
+
   // Vault type: 'local' (OPFS, no server round-trip), 'folder' (real
   // directory picked via showDirectoryPicker, also OPFS-store-backed — see
   // capacitor-shim's fsBackend), or 'server' (HTTP /api/fs). Determined by
@@ -121,6 +151,44 @@ const MOBILE_SCRIPTS = [
   window.__owVaultType = VAULT_TYPE;
   window.__owVaultId   = VAULT_ID;
   console.log('[obsidian-web] vault type:', VAULT_TYPE, 'id:', VAULT_ID);
+
+  // ── /_owres/ folder-vault RPC responder (sw-vault-resources §3ד) ─────────
+  // The SW's `/_owres/` handler (sw.js) can read OPFS ('local' vaults)
+  // directly, but a 'folder' vault's FileSystemDirectoryHandle needs FS
+  // Access permission — `queryPermission`/`requestPermission` require a
+  // user-activated Window, which a Service Worker doesn't have (spike #2,
+  // §0.1). So for folder vaults the SW asks *this* page instead: one hop via
+  // MessageChannel. Answers with the already permission-granted
+  // `window.__owFolderRoot` (set once, via a real user gesture, by
+  // showGrantScreen below) — not a fresh handle re-loaded from IndexedDB,
+  // which could still need a permission re-check (finding 3, brief §3ד).
+  // Registered unconditionally (cheap no-op for 'local'/'server' vaults —
+  // just an early-return on vaultId/type mismatch) since VAULT_TYPE is known
+  // synchronously here but __owFolderRoot is only set later, once the grant
+  // resolves (verifyPromise below) — the listener checks it at call-time.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (ev) {
+      var msg = ev.data;
+      if (!msg || msg.type !== 'ow-res') return;
+      var port = ev.ports && ev.ports[0];
+      if (!port) return;
+      if (msg.vaultId !== VAULT_ID || VAULT_TYPE !== 'folder' || !window.__owFolderRoot) {
+        port.postMessage({ ok: false, error: 'no matching granted folder vault' });
+        return;
+      }
+      var parts = String(msg.realRel || '').split('/').filter(function (p) { return p.length > 0; });
+      var name = parts.pop();
+      var cur = Promise.resolve(window.__owFolderRoot);
+      parts.forEach(function (part) {
+        cur = cur.then(function (dir) { return dir.getDirectoryHandle(part, { create: false }); });
+      });
+      cur.then(function (dir) { return dir.getFileHandle(name, { create: false }); })
+        .then(function (fh) { return fh.getFile(); })
+        .then(function (file) { return file.arrayBuffer(); })
+        .then(function (buf) { port.postMessage({ ok: true, buffer: buf }, [buf]); })
+        .catch(function (e) { port.postMessage({ ok: false, error: String((e && e.message) || e) }); });
+    });
+  }
 
   // (הוסר guard-הפניה ל-/starter כש-VAULT_ID ריק — brief §3א: no-vault
   // מזריק עכשיו את מסך-הפתיחה הנייטיב במקום redirect. /starter עדיין מטופל
@@ -142,12 +210,20 @@ const MOBILE_SCRIPTS = [
   // אחרי ברירות המחדל. מה שמוגדר כאן מנצח.
   //
   // המצב נשמר ב-localStorage תחת המפתח 'obsidian-web:layout-mode'.
+  // deploy-config.md §3(ג): layout.default הוא ה-fallback כשאין עדיין
+  // localStorage pref אישי (פורס יכול לקבוע ברירת-מחדל 'mobile'/'desktop'/
+  // 'auto' לפריסה שלו); layout.threshold מחליף את סף ה-900px הקשיח
+  // (innerHeight<600 נשאר קבוע — §3(ג) בבריף מחווט רק default/threshold).
+  // ES5 guard pattern (avigail): (window.__owConfig && window.__owConfig.X).
   function computeLayoutMode() {
-    var pref = localStorage.getItem('obsidian-web:layout-mode') || 'auto';
+    var cfg = (window.__owConfig && window.__owConfig.layout) || {};
+    var defaultMode = cfg.default || 'auto';
+    var threshold = (typeof cfg.threshold === 'number') ? cfg.threshold : 900;
+    var pref = localStorage.getItem('obsidian-web:layout-mode') || defaultMode;
     if (pref === 'mobile')  return { isMobile: true,  reason: 'user-pref-mobile' };
     if (pref === 'desktop') return { isMobile: false, reason: 'user-pref-desktop' };
     // 'auto' — viewport-based decision
-    var small = window.innerWidth < 900 || window.innerHeight < 600;
+    var small = window.innerWidth < threshold || window.innerHeight < 600;
     return { isMobile: small, reason: 'auto-' + (small ? 'mobile' : 'desktop') };
   }
   var layout = computeLayoutMode();
@@ -564,6 +640,44 @@ const MOBILE_SCRIPTS = [
     });
   }
 
+  // ── מסך-פתיחה נייטיב (no-vault) — כפתור "כספת דמו" (seed-demo §3ד) ─────────
+  // spike (executor): הבריף (avigail סבב 2) מבקש במפורש `.mobile-onboarding`
+  // (לא `.mobile-onboarding-screen`) — root ה-wizard של first-run
+  // (`document.body.createDiv("mobile-onboarding")`, אומת גרפית מול
+  // vendor/obsidian-mobile/app.js). לא `.mobile-vault-chooser-screen`
+  // (משתמש עם ≥1 vault קיים) — הכפתור מיועד למסך-onboarding בלבד (§0).
+  // MutationObserver (לא הזרקה חד-פעמית): שלבי-האשף (welcome→sync-intro→
+  // configure-vault) עשויים לרנדר-מחדש תוכן פנימי; ה-observer מבטיח שהכפתור
+  // חוזר אחרי כל שלב (idempotent — guard על .ow-demo-vault-btn), ופשוט
+  // מפסיק להזריק כש-.mobile-onboarding מוסר (כספת נפתחה/reload — הדף עצמו
+  // עומד להיטען מחדש, אין disconnect() נחוץ). guard demoVault.enabled===false
+  // (ES5, אותו pattern כמו ensureDemo) — לא מציגים כפתור למשהו שלא יעשה כלום.
+  function installDemoVaultButton() {
+    function inject() {
+      var d = window.__owConfig && window.__owConfig.demoVault;
+      if (d && d.enabled === false) return;
+      var root = document.querySelector('.mobile-onboarding');
+      if (!root || root.querySelector('.ow-demo-vault-btn')) return;
+      var btn = document.createElement('button');
+      btn.className = 'ow-demo-vault-btn mod-cta';
+      btn.type = 'button';
+      btn.textContent = 'כספת דמו';
+      btn.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:9999;' +
+        'padding:8px 16px;border:none;border-radius:4px;background:#7f6df2;' +
+        'color:#fff;cursor:pointer;font:13px -apple-system,BlinkMacSystemFont,sans-serif;';
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var id = ensureDemo();
+        if (id) navigateToVault(id);
+      });
+      root.appendChild(btn);
+    }
+    inject();
+    var obs = new MutationObserver(inject);
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
   // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
   // אין VAULT_ID תקף (לא ב-/vault/<id> path, forceStarter, או שה-entry redirect
   // למעלה כבר קבע שאין כספת-אחרונה — ראה למעלה). ה-shims כבר מותקנים (require/capacitor) — מזריקים
@@ -575,6 +689,7 @@ const MOBILE_SCRIPTS = [
     setStatus('Loading Obsidian mobile...');
     installNativeVaultOpenBridge();
     installCreateVaultInterceptor();
+    installDemoVaultButton();
     seedNativeVaultList()
       .catch(function (err) { console.warn('[obsidian-web] seedNativeVaultList failed:', err); })
       .then(function () {
@@ -610,6 +725,78 @@ const MOBILE_SCRIPTS = [
         resolve(perm);
       };
       (overlay || document.body).appendChild(btn);
+    });
+  }
+
+  // ── folder-vault external-change refresh (docs/plans/folder-watch.md §2/§3ד,
+  // reused from slice/folder-refresh, which already verified DoD#3/4/5 there —
+  // the retarget here (folder-watch) is the addListener capture itself, see
+  // capacitor-shim.js + opfs-store.js) ──────────────────────────────────────
+  // folder vaults (a real directory) can change from outside the browser —
+  // another app, a sync client, another tab/device on the same directory.
+  // OpfsStore (opfs-store.js) wires FileSystemObserver where supported and
+  // always exposes rescan() as the manual/fallback path — this installs the
+  // user-facing side: a manual refresh button (always shown — cheap even
+  // when the observer IS active, covers edge cases like {recursive} not
+  // fully supported) and, only when FileSystemObserver isn't supported, a
+  // visibilitychange-triggered auto-rescan (debounced ~500ms) so switching
+  // back to the tab/app picks up external edits without a manual click.
+  // VAULT_TYPE==='folder' guard only (DoD#4) — 'local' (OPFS) vaults can
+  // never change externally, must stay a no-op.
+  function installFolderRefreshWatch() {
+    if (VAULT_TYPE !== 'folder') return;
+    if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.Filesystem) return;
+    var fs = window.Capacitor.Plugins.Filesystem;
+    var hasObserver = typeof self !== 'undefined' && 'FileSystemObserver' in self;
+
+    function debounce(fn, ms) {
+      var t = null;
+      return function () {
+        if (t) clearTimeout(t);
+        t = setTimeout(fn, ms);
+      };
+    }
+
+    var rescanning = false;
+    function doRescan() {
+      if (rescanning || typeof fs.rescan !== 'function') return;
+      rescanning = true;
+      fs.rescan()
+        .catch(function (e) { console.warn('[ow] folder rescan failed', e); })
+        .then(function () { rescanning = false; });
+    }
+
+    // fallback trigger — only when there's no observer to do this for us.
+    // visibilitychange, not window focus — more resilient: fires reliably on
+    // tab-switch/app-resume, unlike focus which some mobile browsers skip.
+    if (!hasObserver) {
+      var debouncedRescan = debounce(function () {
+        if (!document.hidden) doRescan();
+      }, 500);
+      document.addEventListener('visibilitychange', debouncedRescan);
+    }
+
+    // manual refresh button — always shown, fixed-position overlay like the
+    // other boot.js buttons (installDemoVaultButton/showGrantScreen above) —
+    // no existing statusBar/ribbon surface in the mobile bundle is a safe,
+    // stable anchor to hook into without touching vendor internals, so this
+    // follows the same pattern.
+    owWhenAppReady(function () {
+      if (document.querySelector('.ow-folder-refresh-btn')) return;
+      var btn = document.createElement('button');
+      btn.className = 'ow-folder-refresh-btn';
+      btn.type = 'button';
+      btn.title = 'רענן — בדוק שינויים חיצוניים בתיקייה';
+      btn.textContent = '⟳';
+      btn.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;' +
+        'width:40px;height:40px;border:none;border-radius:50%;background:#7f6df2;' +
+        'color:#fff;cursor:pointer;font-size:18px;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.3);';
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        doRescan();
+      });
+      document.body.appendChild(btn);
     });
   }
 
@@ -661,13 +848,38 @@ const MOBILE_SCRIPTS = [
       // no-vault כבר התקין (לא קורה באותו טעינת-עמוד, אבל להיות עקבי).
       installNativeVaultOpenBridge();
 
+      // ── seed guard — empty-vault-only (seed-demo §0/§3ב, data-safety core) ──
+      // A local/folder vault the user already has real content in must NEVER
+      // be seeded (system plugins OR example content) without consent —
+      // today's unconditional seed damages real vaults (brief §0). readdir
+      // root, filter out .obsidian/.trash (Obsidian's own bookkeeping, not
+      // user content) — ANY remaining entry → "not empty" → skip BOTH blocks
+      // below entirely. readdir failure (e.g. permission edge) defaults to
+      // "not empty" (skip) — data-safety-first when uncertain. `seedStore` is
+      // reused by both blocks below (one makeStore()+readdir round-trip).
+      var seedStore = null;
+      var isVaultEmptyForSeed = false;
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore) {
+        var grSeed = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
+        seedStore = window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: grSeed });
+        try {
+          var rootListing = await seedStore.readdir({ path: '' });
+          var userEntries = ((rootListing && rootListing.files) || []).filter(function (f) {
+            return f.name !== '.obsidian' && f.name !== '.trash';
+          });
+          isVaultEmptyForSeed = userEntries.length === 0;
+        } catch (e) {
+          console.warn('[ow] seed guard readdir failed — skipping seed (data-safety default)', e);
+        }
+      }
+
       // seed system plugins ל-OPFS/folder לפני טעינת Obsidian (כדי ש-
       // community-plugins.json יהיה מוכן כש-Obsidian קורא אותו) — local
       // (OPFS) ו-folder vaults (לא server, שמקבל אותם דרך overlay צד-שרת
       // קיים). לא חוסם את הפתיחה אם נכשל (retry ב-boot הבא דרך ה-version-gate).
-      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedSystemPlugins) {
-        var gr = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
-        try { await window.__owSeedSystemPlugins.seedSystemPlugins(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr })); }
+      // isVaultEmptyForSeed (למעלה): לעולם לא בכספת עם תוכן-משתמש קיים.
+      if (isVaultEmptyForSeed && seedStore && window.__owSeedSystemPlugins) {
+        try { await window.__owSeedSystemPlugins.seedSystemPlugins(seedStore); }
         catch (e) { console.warn('[ow] seed system plugins failed', e); }
       }
 
@@ -676,9 +888,13 @@ const MOBILE_SCRIPTS = [
       // fetch מחזיר 404 ו-seedExampleVault מדלג). לא נוגע ב-.obsidian/ (finding
       // 1 בבריף — הקונפיג בבלעדיות של seedSystemPlugins למעלה). לא חוסם את
       // הפתיחה אם נכשל. ראה docs/plans/cf-mobile-seed.md §3ג.
-      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedExampleVault) {
-        var gr2 = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
-        try { await window.__owSeedExampleVault.seedExampleVault(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr2 })); }
+      // deploy-config.md §3(ג): המתג seedExampleContent (ברירת-מחדל true —
+      // התנהגות היום, DoD#2/#5) — ES5 guard pattern (avigail):
+      // (window.__owConfig && window.__owConfig.X). isVaultEmptyForSeed
+      // (למעלה): לעולם לא בכספת עם תוכן-משתמש קיים (seed-demo §0/§3ב).
+      if (isVaultEmptyForSeed && seedStore && window.__owSeedExampleVault
+          && (window.__owConfig && window.__owConfig.seedExampleContent)) {
+        try { await window.__owSeedExampleVault.seedExampleVault(seedStore); }
         catch (e) { console.warn('[ow] seed example vault failed', e); }
       }
 
@@ -727,6 +943,11 @@ const MOBILE_SCRIPTS = [
       // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
       // חולצה ל-injectMobileScripts() למעלה — נגישה גם לזרימת ה-no-vault.
       injectMobileScripts();
+
+      // folder-vault external-change refresh (docs/plans/folder-watch.md §2) —
+      // VAULT_TYPE guard is inside installFolderRefreshWatch itself (no-op
+      // ל-local/server).
+      installFolderRefreshWatch();
 
       // ── שם-כספת מוצג מה-registry (docs/plans/vault-name-display.md §2/§3) ──
       // לכספת OPFS (local/folder) עם רשומת-registry, __owV.name הוא השם
