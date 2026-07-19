@@ -20,9 +20,7 @@ const BUILD_ID = '__OW_BUILD__';       // מוזרק: CF=build-assets sed; מק�
 const CACHE = 'ow-sw-' + BUILD_ID;
 
 // ── /_owres/ vault-resource serving — spike findings (§0.1, executor, before
-// implementation) — docs/plans/sw-vault-resources.md §3. The `/_owres/`
-// fetch handler itself lands in the next commit; recorded here first per the
-// brief's own commit split (Commit 1 = spikes, manual+probe).
+// implementation) — docs/plans/sw-vault-resources.md §3.
 //
 // Empirical setup: playwright (bunx playwright, local chromium — no gui-host
 // available in this environment) headless against the real local dev server
@@ -71,6 +69,97 @@ const CACHE = 'ow-sw-' + BUILD_ID;
 // (Real PDF.js rendering / video playback in the DOM is left to the
 // end-of-slice calev-heavy E2E pass — this probe validated the serving
 // layer the DOM consumers sit on top of.)
+//
+// §3ג — MIME by extension. Small map; unknown ext → generic octet-stream
+// (still downloadable/playable-if-browser-sniffs, never a hard failure).
+const OWRES_PREFIX = '/_owres/';
+const MIME_BY_EXT = {
+  pdf: 'application/pdf',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4',
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', wav: 'audio/wav',
+  m4a: 'audio/mp4', flac: 'audio/flac',
+};
+function owresMime(name) {
+  const idx = name.lastIndexOf('.');
+  const ext = idx === -1 ? '' : name.slice(idx + 1).toLowerCase();
+  return MIME_BY_EXT[ext] || 'application/octet-stream';
+}
+
+// '/_owres/<vaultId>/<rest...>' (percent-encoded) → { vaultId, realRel } —
+// strips one leading '<vaultId>/' segment from rest if present (the
+// double-id Obsidian's own client-side concat produces, see getUri's
+// comment in opfs-store.js). finding 4 (brief §3ה, accepted-risk,
+// unconditional-on-match): a real top-level file/dir named exactly the
+// vaultId (16-hex-char id) would be mis-stripped — probability ~0,
+// documented, not handled.
+function normalizeOwResPath(pathname) {
+  const relFull = pathname.slice(OWRES_PREFIX.length);
+  const segs = relFull.split('/').filter((s) => s.length > 0).map(decodeURIComponent);
+  if (segs.length === 0) return null;
+  const vaultId = segs[0];
+  let rest = segs.slice(1);
+  if (rest.length > 0 && rest[0] === vaultId) rest = rest.slice(1);
+  return { vaultId, realRel: rest.join('/') };
+}
+
+// OPFS ('local' vault) read — direct, no permission gate (spike #1).
+function owresOpfsRead(vaultId, relPath) {
+  return self.navigator.storage.getDirectory()
+    .then((root) => root.getDirectoryHandle('vaults', { create: false }))
+    .then((vaults) => vaults.getDirectoryHandle(vaultId, { create: false }))
+    .then((vaultRoot) => {
+      const parts = relPath.split('/').filter((p) => p.length > 0);
+      const name = parts.pop();
+      let cur = Promise.resolve(vaultRoot);
+      parts.forEach((part) => {
+        cur = cur.then((dir) => dir.getDirectoryHandle(part, { create: false }));
+      });
+      return cur.then((dir) => dir.getFileHandle(name, { create: false }));
+    })
+    .then((fh) => fh.getFile());
+}
+
+function handleOwRes(req, url) {
+  const parsed = normalizeOwResPath(url.pathname);
+  if (!parsed) return Promise.resolve(new Response('Not found', { status: 404 }));
+  return owresOpfsRead(parsed.vaultId, parsed.realRel)
+    .then((file) => buildOwResResponse(file, parsed.realRel, req))
+    .catch(() => new Response('Not found', { status: 404 }));
+}
+
+// Range support (brief finding 1, critical): video/audio/PDF.js all rely on
+// 206 + Content-Range to play/seek — a 200-only response breaks them.
+function buildOwResResponse(file, relPath, req) {
+  const mime = owresMime(relPath);
+  const size = file.size;
+  const rangeHeader = req.headers.get('Range');
+  if (rangeHeader) {
+    const m = /bytes=(\d*)-(\d*)/.exec(rangeHeader);
+    if (m) {
+      const start = m[1] ? parseInt(m[1], 10) : 0;
+      const end = m[2] ? Math.min(parseInt(m[2], 10), size - 1) : size - 1;   // clamp end (over-request)
+      if (start <= end && start < size) {
+        const chunk = file.slice(start, end + 1);
+        return new Response(chunk, {
+          status: 206,
+          headers: {
+            'Content-Type': mime,
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Content-Length': String(end - start + 1),
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+    }
+  }
+  return new Response(file, {
+    status: 200,
+    headers: { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' },
+  });
+}
 
 self.addEventListener('install', (e) => { self.skipWaiting(); });   // ללא precache — cache-first ממלא לפי צריכה
 self.addEventListener('activate', (e) => {
@@ -85,6 +174,15 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;        // cross-origin (CouchDB/GitHub) → pass-through
   if (url.pathname.startsWith('/api/')) return;           // dynamic → network-only
   if (url.pathname === '/sw.js') return;                  // ה-SW עצמו — לעולם לא מ-cache (שהדפדפן יזהה גרסה חדשה)
+
+  // /_owres/ — vault resource serving (OPFS/folder binaries), MUST be before
+  // navigate/static so it's never swallowed by either branch below (§3ה).
+  // resource fetches (img/pdf/video/audio) are mode 'no-cors'/'cors', not
+  // 'navigate' — this ordering is belt-and-suspenders.
+  if (url.pathname.indexOf(OWRES_PREFIX) === 0) {
+    e.respondWith(handleOwRes(req, url));
+    return;
+  }
 
   // navigation → network-first, fallback ל-'/' (ה-entry המבוסט; CF+מקומי מגישים מובייל ב-/)
   if (req.mode === 'navigate') {

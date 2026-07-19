@@ -339,25 +339,21 @@
       },
 
       async getUri(opts) {
-        // Obsidian calls getUri({path:''}) at vault-open to build a base uri —
-        // this must never throw (mirrors HttpFilesystem.getUri, which returns a
-        // string for any path without touching the FS). Real file → blob URL
-        // (for future attachments); root/dir/missing → synthetic uri, no throw.
+        // Obsidian calls getUri({path:''}) at vault-open to build a base uri,
+        // then string-concatenates <vaultId>/<relPath> onto it per-attachment
+        // client-side (spike finding, folder-vault-blob-uri) — this must
+        // never throw (mirrors HttpFilesystem.getUri).
+        //
+        // sw-vault-resources §3א: the base uri is now an **http** URL served
+        // by the Service Worker's `/_owres/` handler (sw.js) straight out of
+        // OPFS/folder-handle — one mechanism for every binary type (img/PDF/
+        // video/audio), replacing the invented `ow-vault:` scheme the browser
+        // blocked, and replacing per-file blob URLs (rejected — see brief §2,
+        // "not one mechanism"). Obsidian's client-side concat produces the
+        // expected double-id path `/_owres/<id>/<id>/<rel>`, normalized by
+        // the SW handler.
         const rel = String(opts.path || '').replace(/^\/+|\/+$/g, '');
-        if (rel !== '') {
-          try {
-            const { parent, name } = await resolveParent(rel, { create: false });
-            const fh = await parent.getFileHandle(name, { create: false });
-            return { uri: URL.createObjectURL(await fh.getFile()) };
-          } catch (_) {
-            // directory or missing → fall through to the synthetic uri below
-            // (no throw, matching HttpFilesystem).
-          }
-        }
-        // Generic scheme (not 'opfs:/vaults/...') — this store also backs
-        // 'folder' vaults, which aren't nested under /vaults/<id> at all.
-        // Obsidian accepts any string here; only the label changes.
-        return { uri: 'ow-vault:/' + vaultId + (rel ? '/' + rel : '/') };
+        return { uri: location.origin + '/_owres/' + vaultId + (rel ? '/' + rel : '/') };
       },
 
       // No external file-system changes can happen to OPFS behind our back —
