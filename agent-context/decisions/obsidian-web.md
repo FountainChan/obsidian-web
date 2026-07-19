@@ -2,6 +2,38 @@
 
 > ‏רציונל ‏ארכיטקטוני ‏פר-slice (‏מרדכי). ‏ליד הקוד, ‏לא ‏בריפו ‏השיטה.
 
+## 2026-07-19 — folder-watch: תיקון addListener dispatch ב-Capacitor-shim (מחליף folder-refresh)
+
+### רציונל
+כספת-folder לא זיהתה שינויים חיצוניים. folder-refresh בנה את מנגנון-ה-watch נכון (FileSystemObserver
+primary + rescan/כפתור fallback) אבל **נכשל ב-runtime (calev NO-GO)**: ה-callback של
+`Filesystem.addListener('change', cb)` מעולם לא הגיע ל-store. folder-watch מתקן את שורש-הבעיה וממחזר את
+קוד-ה-watch שכבר אומת ב-folder-refresh.
+
+### שורש (אומת סטטית ע"י אביגיל מול vendor/obsidian-mobile/app.js)
+ה-Capacitor registerPlugin proxy מנתב לפי `rtype`: `"promise"===rtype ? nativePromise : nativeCallback(e,n,t,i)`.
+ה-shim הצהיר `addListener` כ-`rtype:'promise'` (`pm()`, capacitor-shim.js:991) → נותב ל-nativePromise
+שמעביר **single-arg** (`method.call(plugin, options||{})`, :946) → ה-2nd arg (ה-callback) אבד לפני ה-store.
+
+### שינויי-כיוון (לפי ממצאי אביגיל, סבב 1 USABLE-AFTER-FIX)
+- **Option A המקורי נפסל**: override על `cap.Plugins.Filesystem.addListener` — אבל זה Proxy **get-only**
+  (:672), ההצבה מוצללת, ו-Obsidian ניגש דרך ה-registerPlugin proxy שלו. חסר-אפקט.
+- **התיקון הנכון = שכבת-הניתוב, שני חלקים חובה**: (1) הצהר `addListener` כ-`rtype:'callback'` (helper `cm()`)
+  → ה-proxy מעביר 2-arg, בדיוק הסיגנטורה ש-store.addListener כבר מצפה לה; (2) override ל-`cap.nativeCallback`
+  — כי אימות הראה ש-nativeCallback **לא עבר override** (רק nativePromise), אז הצהרת rtype לבדה תפנה ל-native-bridge
+  המקורי → "not implemented on android". שני החלקים יחד.
+- **regression scope הורחב**: nativeCallback הוא מסלול משותף → App.addListener (stub) חייב אימות מפורש, לא רק
+  תחת fallback.
+
+### רעיונות שנדחו
+- **הסרת addListener מ-PluginHeaders** (Option B המקורי): נשאר כ-fallback ממוקד בלבד (אם ה-spike יגלה
+  ש-core לא עובר דרך nativeCallback) — שביר, לא ברירת-מחדל.
+- **polling מתמיד**: נדחה לטובת FileSystemObserver primary + rescan on-demand.
+
+### אימות
+calev-heavy (complexity 7) — **חובה מול Obsidian אמיתי** (הלקח מ-folder-refresh: self-test עקף את ה-Capacitor
+bridge ופספס את הכשל). addListener capture דרך ה-bridge, שינוי חיצוני→מופיע (observer+fallback), regression App.
+
 ## 2026-07-17 — vault-switcher-fix: polyfill ל-native-select של "נהל כספות" (באג preview)
 
 ### ‏רציונל
