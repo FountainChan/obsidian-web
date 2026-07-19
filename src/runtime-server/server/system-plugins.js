@@ -28,10 +28,10 @@ const fsp = fs.promises;
 const path = require('path');
 
 // src/plugins/ — our own plugins, tracked in git.
-const SYSTEM_PLUGINS_DIR = path.resolve(__dirname, '..', 'plugins');
+const SYSTEM_PLUGINS_DIR = path.resolve(__dirname, '..', '..', 'plugins');
 
 // vendor/plugins/ — downloaded third-party plugins, gitignored.
-const VENDOR_PLUGINS_DIR = path.resolve(__dirname, '..', '..', 'vendor', 'plugins');
+const VENDOR_PLUGINS_DIR = path.resolve(__dirname, '..', '..', '..', 'vendor', 'plugins');
 
 // Populated by init() — maps plugin id → absolute rootDir.
 // src/plugins takes precedence over vendor/plugins (first-wins).
