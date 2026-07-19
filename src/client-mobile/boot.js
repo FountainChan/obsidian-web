@@ -669,13 +669,38 @@ const MOBILE_SCRIPTS = [
       // no-vault כבר התקין (לא קורה באותו טעינת-עמוד, אבל להיות עקבי).
       installNativeVaultOpenBridge();
 
+      // ── seed guard — empty-vault-only (seed-demo §0/§3ב, data-safety core) ──
+      // A local/folder vault the user already has real content in must NEVER
+      // be seeded (system plugins OR example content) without consent —
+      // today's unconditional seed damages real vaults (brief §0). readdir
+      // root, filter out .obsidian/.trash (Obsidian's own bookkeeping, not
+      // user content) — ANY remaining entry → "not empty" → skip BOTH blocks
+      // below entirely. readdir failure (e.g. permission edge) defaults to
+      // "not empty" (skip) — data-safety-first when uncertain. `seedStore` is
+      // reused by both blocks below (one makeStore()+readdir round-trip).
+      var seedStore = null;
+      var isVaultEmptyForSeed = false;
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore) {
+        var grSeed = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
+        seedStore = window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: grSeed });
+        try {
+          var rootListing = await seedStore.readdir({ path: '' });
+          var userEntries = ((rootListing && rootListing.files) || []).filter(function (f) {
+            return f.name !== '.obsidian' && f.name !== '.trash';
+          });
+          isVaultEmptyForSeed = userEntries.length === 0;
+        } catch (e) {
+          console.warn('[ow] seed guard readdir failed — skipping seed (data-safety default)', e);
+        }
+      }
+
       // seed system plugins ל-OPFS/folder לפני טעינת Obsidian (כדי ש-
       // community-plugins.json יהיה מוכן כש-Obsidian קורא אותו) — local
       // (OPFS) ו-folder vaults (לא server, שמקבל אותם דרך overlay צד-שרת
       // קיים). לא חוסם את הפתיחה אם נכשל (retry ב-boot הבא דרך ה-version-gate).
-      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedSystemPlugins) {
-        var gr = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
-        try { await window.__owSeedSystemPlugins.seedSystemPlugins(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr })); }
+      // isVaultEmptyForSeed (למעלה): לעולם לא בכספת עם תוכן-משתמש קיים.
+      if (isVaultEmptyForSeed && seedStore && window.__owSeedSystemPlugins) {
+        try { await window.__owSeedSystemPlugins.seedSystemPlugins(seedStore); }
         catch (e) { console.warn('[ow] seed system plugins failed', e); }
       }
 
@@ -686,11 +711,11 @@ const MOBILE_SCRIPTS = [
       // הפתיחה אם נכשל. ראה docs/plans/cf-mobile-seed.md §3ג.
       // deploy-config.md §3(ג): המתג seedExampleContent (ברירת-מחדל true —
       // התנהגות היום, DoD#2/#5) — ES5 guard pattern (avigail):
-      // (window.__owConfig && window.__owConfig.X).
-      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedExampleVault
+      // (window.__owConfig && window.__owConfig.X). isVaultEmptyForSeed
+      // (למעלה): לעולם לא בכספת עם תוכן-משתמש קיים (seed-demo §0/§3ב).
+      if (isVaultEmptyForSeed && seedStore && window.__owSeedExampleVault
           && (window.__owConfig && window.__owConfig.seedExampleContent)) {
-        var gr2 = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
-        try { await window.__owSeedExampleVault.seedExampleVault(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr2 })); }
+        try { await window.__owSeedExampleVault.seedExampleVault(seedStore); }
         catch (e) { console.warn('[ow] seed example vault failed', e); }
       }
 

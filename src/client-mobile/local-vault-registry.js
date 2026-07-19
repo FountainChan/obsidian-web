@@ -14,6 +14,18 @@
  *
  * See docs/plans/local-vaults-implementation.md → Phase 2a,
  * docs/plans/opfs-wire.md → §4 Commit 0.
+ *
+ * `create(name, opts)` accepts an optional `opts.id` (docs/plans/seed-demo.md
+ * §3א) — a fixed id, used by the lazy Demo vault (ensureDemo, boot.js) so
+ * repeated boots resolve to the SAME OPFS-backed vault instead of minting a
+ * new one every time. Existing callers that omit `opts.id` are unaffected
+ * (falls back to `uuid()`, today's behavior — brief §6 risk).
+ *
+ * No browser/DOM deps beyond `localStorage`/`crypto` (both global, not
+ * `window.`-qualified, so a Node/bun test can polyfill them on `global`
+ * before requiring this module — same pattern as bootstrap-lookup.js).
+ * Attaches to window.__owLocalVaults in the browser; module.exports under
+ * node:test/bun test.
  */
 (function () {
   'use strict';
@@ -38,7 +50,7 @@
     return Array.from(arr).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
   }
 
-  window.__owLocalVaults = {
+  var api = {
     list: function () {
       var map = load();
       return Object.entries(map)
@@ -54,9 +66,14 @@
     has: function (id) {
       return !!this.get(id);
     },
+    // opts.id (seed-demo §3א): fixed id, used by the lazy Demo vault so
+    // repeated ensureDemo() calls resolve to the same vault instead of
+    // minting a new uuid every time. Falls back to uuid() when omitted —
+    // zero behavior change for existing callers (create-vault interceptor,
+    // folder-vault flow), brief §6 risk.
     create: function (name, opts) {
       var map = load();
-      var id = uuid();
+      var id = (opts && opts.id) || uuid();
       map[id] = { name: name || 'Untitled', createdAt: Date.now(), type: (opts && opts.type) || 'local' };
       save(map);
       return { id: id, name: map[id].name, type: map[id].type };
@@ -78,4 +95,10 @@
       return true;
     },
   };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  } else if (typeof window !== 'undefined') {
+    window.__owLocalVaults = api;
+  }
 })();
