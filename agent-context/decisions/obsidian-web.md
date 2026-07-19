@@ -570,3 +570,38 @@ obsidian.md/terms · forum.obsidian.md/t/25371 · github.com/acheong08/obi-sync 
 - **decisions + architecture** → כאן ב-`agent-context/` (ליד הקוד, ל"מי-שמשנה-קוד").
 - **`docs/`** → אנושי בלבד (dev-setup, guides).
 - **`AGENTS.md`** (שורש) = מקור-אמת לסוכנים; **`CLAUDE.md`** = `@AGENTS.md` (DRY).
+
+## 2026-07-19 — sw-vault-resources: הגשת משאבים בינאריים דרך Service Worker
+
+### רציונל
+PDF/תמונות בכספת לא נטענים ב-serverless: getResourcePath מייצר `ow-vault:/<id>/<id>/file`
+(סכמה מומצאת שהדפדפן חוסם). spike (folder-vault-blob-uri) הוכיח שהבאג ארכיטקטוני — Obsidian
+מטמין את uri-השורש (getUri נקרא רק path:'') ומשרשר פר-קובץ בצד-לקוח, לא עובר דרכנו.
+
+### ההבחנה MD מול בינארי (הליבה)
+- **MD/טקסט**: Obsidian קורא דרך readFile → ה-shim שלנו → בייטים ל-JS. עובד.
+- **בינארי (PDF/img/video/audio)**: Obsidian בונה <img src>/viewer ונותן ל**דפדפן** לטעון מ-URL.
+  ה-URL חייב סכמה fetchable — ow-vault: לא כזו.
+
+### ההחלטה: פתרון אחיד — SW-served http URL (לא hybrid)
+uri-שורש = `location.origin + '/_owres/' + vaultId + '/'`; Service Worker מיירט `/_owres/*`,
+מנרמל double-id, וקורא מ-OPFS (או folder-handle), מגיש עם MIME + Range→206.
+
+**זו המקבילה ה-web למנגנון הנייטיב של Obsidian**: Electron רושם `app://` (protocol handler);
+Capacitor `convertFileSrc`→`https://localhost/_capacitor_file_/`→native intercept. בדפדפן אין
+שכבת-נייטיב שתיירט סכמה מומצאת — ה-SW הוא הכלי היחיד שמיירט fetch ומגיש תוכן. לא hack — שחזור.
+
+### רעיונות שנשקלו ונדחו
+- **strip ב-getUri** (התוכנית המקורית): dead code — getUri לא נקרא פר-קובץ (spike הוכיח).
+- **blob: URL**: אטום, לא-משתרשר — נשבר עם המודל cache+concat של Obsidian.
+- **MutationObserver+blob (page-only)**: אלגנטי לתמונות/מדיה (DOM elements), אבל PDF עושה fetch
+  תכנותי (לא element) → לא-אחיד. המשתמשת בחרה פתרון-אחיד על-פני page-only-חלקי.
+
+### החלטות המשתמשת
+- folder-vault (המחשב המקומי): אם SW יכול לקרוא handle מ-IDB (הרשאה) → SW-ישיר; אחרת RPC
+  ל-page (hop אחד, ה-page מחזיק __owFolderRoot מורשה). spike #2 מכריע.
+- ה-serverless ראשי; זו שכבת-ההגשה החסרה שהופכת אותו למלא (משאבים בינאריים).
+
+### ממצאי אביגיל (2 סבבים)
+- 🔴 Range: video/audio/PDF.js דורשים 206+Content-Range ל-seek/stream — נוסף (file.slice).
+- placement: /_owres/ ראשון (לפני navigate), אחרת ייבלע.
