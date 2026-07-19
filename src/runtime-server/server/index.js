@@ -11,6 +11,7 @@
 
 const express = require('express');
 const compression = require('compression');
+const fs = require('fs');
 const fsp = require('fs/promises');
 const http = require('http');
 const path = require('path');
@@ -59,6 +60,25 @@ function createApp(appConfig = {}) {
   // changes automatically. The bust value is recomputed at server startup from
   // client/ and client-mobile/ file mtimes — no manual ?v=N bump needed.
   const cacheBust = appConfig.clientCacheBust || 'dev';
+
+  // deploy-config inject (docs/plans/deploy-config.md §4 Commit 3) — read once
+  // per app (not per-request), mirrors what build-assets.sh does for the CF
+  // deploy: replace the <!-- OW_CONFIG_INJECT --> marker in index.html with a
+  // literal <script>window.__owConfigInjected={...}</script>, positioned
+  // before the deploy-config.js tag (already the case in the source
+  // index.html). If the config file is missing/unreadable the snippet stays
+  // empty — the marker is replaced with '' (no injected script), so
+  // deploy-config.js falls back to its DEFAULTS, same zero-regression
+  // behavior as the CF build's "no config" case.
+  let deployConfigSnippet = '';
+  try {
+    const deployConfigPath = path.join(appConfig.projectRoot, 'src', 'config', 'deploy-config.json');
+    const deployConfig = JSON.parse(fs.readFileSync(deployConfigPath, 'utf8'));
+    deployConfigSnippet = '<script>window.__owConfigInjected=' + JSON.stringify(deployConfig) + '</script>';
+  } catch (err) {
+    console.warn('[deploy-config] could not read src/config/deploy-config.json — window.__owConfig will use client-side DEFAULTS:', err.message);
+  }
+
   async function sendHtmlWithCacheBust(res, filePath) {
     try {
       let html = await fsp.readFile(filePath, 'utf8');
@@ -66,6 +86,7 @@ function createApp(appConfig = {}) {
       // Handles both: existing ?v=3 and paths without any query string.
       html = html.replace(/((?:src|href)="\/client(?:-mobile)?\/[^"]*?)(\?v=[^"&]*)?"(?=[^>]*>)/g,
         (_, prefix) => `${prefix}?v=${cacheBust}"`);
+      html = html.replace('<!-- OW_CONFIG_INJECT -->', deployConfigSnippet);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
       res.send(html);
