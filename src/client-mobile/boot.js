@@ -602,6 +602,44 @@ const MOBILE_SCRIPTS = [
     });
   }
 
+  // ── מסך-פתיחה נייטיב (no-vault) — כפתור "כספת דמו" (seed-demo §3ד) ─────────
+  // spike (executor): הבריף (avigail סבב 2) מבקש במפורש `.mobile-onboarding`
+  // (לא `.mobile-onboarding-screen`) — root ה-wizard של first-run
+  // (`document.body.createDiv("mobile-onboarding")`, אומת גרפית מול
+  // vendor/obsidian-mobile/app.js). לא `.mobile-vault-chooser-screen`
+  // (משתמש עם ≥1 vault קיים) — הכפתור מיועד למסך-onboarding בלבד (§0).
+  // MutationObserver (לא הזרקה חד-פעמית): שלבי-האשף (welcome→sync-intro→
+  // configure-vault) עשויים לרנדר-מחדש תוכן פנימי; ה-observer מבטיח שהכפתור
+  // חוזר אחרי כל שלב (idempotent — guard על .ow-demo-vault-btn), ופשוט
+  // מפסיק להזריק כש-.mobile-onboarding מוסר (כספת נפתחה/reload — הדף עצמו
+  // עומד להיטען מחדש, אין disconnect() נחוץ). guard demoVault.enabled===false
+  // (ES5, אותו pattern כמו ensureDemo) — לא מציגים כפתור למשהו שלא יעשה כלום.
+  function installDemoVaultButton() {
+    function inject() {
+      var d = window.__owConfig && window.__owConfig.demoVault;
+      if (d && d.enabled === false) return;
+      var root = document.querySelector('.mobile-onboarding');
+      if (!root || root.querySelector('.ow-demo-vault-btn')) return;
+      var btn = document.createElement('button');
+      btn.className = 'ow-demo-vault-btn mod-cta';
+      btn.type = 'button';
+      btn.textContent = 'כספת דמו';
+      btn.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:9999;' +
+        'padding:8px 16px;border:none;border-radius:4px;background:#7f6df2;' +
+        'color:#fff;cursor:pointer;font:13px -apple-system,BlinkMacSystemFont,sans-serif;';
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var id = ensureDemo();
+        if (id) navigateToVault(id);
+      });
+      root.appendChild(btn);
+    }
+    inject();
+    var obs = new MutationObserver(inject);
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
   // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
   // אין VAULT_ID תקף (לא ב-/vault/<id> path, forceStarter, או שה-entry redirect
   // למעלה כבר קבע שאין כספת-אחרונה — ראה למעלה). ה-shims כבר מותקנים (require/capacitor) — מזריקים
@@ -613,6 +651,7 @@ const MOBILE_SCRIPTS = [
     setStatus('Loading Obsidian mobile...');
     installNativeVaultOpenBridge();
     installCreateVaultInterceptor();
+    installDemoVaultButton();
     seedNativeVaultList()
       .catch(function (err) { console.warn('[obsidian-web] seedNativeVaultList failed:', err); })
       .then(function () {

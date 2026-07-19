@@ -6,6 +6,67 @@
 
 ---
 
+## 2026-07-19 — slice seed-demo (Commit 3/3, סיום)
+
+### כפתור "כספת דמו" על `.mobile-onboarding`
+
+Brief: `docs/plans/seed-demo.md` §3(ד), DoD #4.
+
+#### מה בוצע?
+
+**`src/client-mobile/boot.js`**
+
+- `installDemoVaultButton()` — מזריק כפתור `.ow-demo-vault-btn` (fixed
+  bottom-left, `mod-cta`) לתוך `.mobile-onboarding` (**לא** `.mobile-
+  onboarding-screen` — תיקון-סבב-2 אביגיל; אומת גרפית מול
+  `vendor/obsidian-mobile/app.js`: שני הclass-ים קיימים כ-DOM-ים נפרדים,
+  `.mobile-onboarding` הוא ה-root של אשף ה-first-run
+  `document.body.createDiv("mobile-onboarding")`).
+- `MutationObserver` על `document.body` (במקום הזרקה חד-פעמית) — שלבי-האשף
+  (welcome→sync-intro→configure-vault) עשויים לרנדר-מחדש; ה-observer מזריק
+  מחדש בכל מוטציה, idempotent (guard `root.querySelector('.ow-demo-vault-
+  btn')`).
+- guard `demoVault.enabled===false` (ES5, אותו pattern כמו `ensureDemo`) —
+  לא מציגים כפתור למשהו שלא יעשה כלום כשה-feature כבוי.
+- onClick: `ensureDemo()` (Commit 2, create-if-missing עם id קבוע) →
+  `navigateToVault(id)` (פונקציה קיימת, path-based `/vault/<id>`).
+- נקרא מתוך ענף ה-no-vault הקיים (`installDemoVaultButton();` לצד
+  `installCreateVaultInterceptor();`) — לא רץ כשיש vault פתוח/רשימת-vaults
+  (chooser).
+
+#### בדיקות
+
+- `bun build boot.js` → syntax תקין; `bun test test/` — 46/46 ירוקים (ללא
+  שינוי, ראה "חריגות").
+- **תיקון תשתית שאִפשר בדיקת-דפדפן חלקית**: מפתח `~/.ssh/pico` היה פגום
+  (שורות CRLF — `error in libcrypto` בניסיון Commit 2). המרתי ל-LF
+  (`tr -d '\r'`, גיבוי ב-`~/.ssh/pico.bak-crlf`) — תוקן, `ssh-keygen -l`
+  עובד. פתחתי מנהרת `tuns.sh` (`https://musicode-localhost.nue.tuns.sh`) אל
+  שרת מקומי (`PORT=4080`, `src/runtime-server/server`) — **הגיע**
+  (`curl .../starter` → 200) אבל **אין דפדפן זמין בסביבת-הביצוע הזו** לפתוח
+  אותה בפועל (`chromium`/`firefox` לא מותקנים; alias SSH `linux-gui`
+  [ה-remote-GUI container הרגיל] לא מוגדר ב-`~/.ssh/config` של הסביבה
+  הנוכחית — `Could not resolve hostname linux-gui`). המנהרה נסגרה בסוף
+  הבדיקה.
+- **סטטי**: `grep` על `vendor/obsidian-mobile/app.js` אימת ששני ה-class-ים
+  (`mobile-onboarding` root ו-`mobile-onboarding-screen`) קיימים כ-strings
+  נפרדים בבאנדל, ושה-selector `.mobile-onboarding` (בלי `-screen`) שהבריף
+  דורש (תיקון סבב-2) אכן תואם ל-DOM אמיתי (`document.body.createDiv
+  ("mobile-onboarding")`), לא רק לניחוש.
+
+#### חריגות
+
+- **verification interactive מלא (כפתור→Demo זרוע, onboarding למשתמש-חדש,
+  deep-link) לא בוצע ע"י אליעזר** — אין דפדפן/linux-gui זמין בסביבה. זה
+  בדיוק התפקיד המיועד ל-**calev-heavy** לפי §8 בבריף ("E2E: תיקייה-עם-תוכן
+  (אין seed), ריקה (seed), onboarding למשתמש-חדש, כפתור→Demo, deep-link,
+  regression") — מופעל מיד אחרי commit זה, לפני מסירת ה-slice.
+- מיקום הכפתור (bottom-left, fixed) הוא spike-החלטת-executor (הבריף לא
+  קבע מיקום מדויק, §3ד: "spike מקום") — לא נבדק ויזואלית מול mockup (אין
+  mockup לפריט הזה בבריף).
+
+---
+
 ## 2026-07-19 — slice seed-demo (Commit 2/3)
 
 ### ensureDemo() + /vault/<demoId>
