@@ -24,7 +24,7 @@ The browser version can load faster than the desktop app. Instead of Obsidian re
 
 | | **Node.js server** | **Cloudflare Workers** |
 |---|---|---|
-| Path | `src/server/` | `src/deployments/cloudflare/` |
+| Path | `src/runtime-server/server/` | `src/deployments/cloudflare/` |
 | Storage | Real filesystem | Durable Object (in-memory) |
 | Persistence | Full | R2 (optional) or reset every N hours |
 | Use case | Personal use, self-hosted | Public demo, zero-maintenance |
@@ -35,7 +35,8 @@ The browser version can load faster than the desktop app. Instead of Obsidian re
 ```
 src/                         our source code
 ├── client-mobile/           the (only) runtime, loaded at / (and aliased at /mobile)
-├── server/                  Node.js HTTP/WS backend
+├── runtime-server/
+│   └── server/              Node.js HTTP/WS backend
 ├── plugins/                 system plugin overlay (e.g. obsidian-web-layout)
 └── deployments/             provider-specific deployments
     └── cloudflare/          Cloudflare Workers + Durable Object
@@ -74,7 +75,7 @@ node scripts/update-obsidian-mobile.js && node scripts/patch-obsidian-mobile.js
 Install and run the backend:
 
 ```bash
-cd src/server
+cd src/runtime-server/server
 npm install
 npm run dev   # auto-reloads on file changes (uses node --watch)
 ```
@@ -198,10 +199,10 @@ Environment variables in `wrangler.toml`:
 
 ## Node.js deployment
 
-The Node.js server (`src/server/`) can be deployed to any Linux box. A typical setup:
+The Node.js server (`src/runtime-server/server/`) can be deployed to any Linux box. A typical setup:
 
 1. Clone the repo and run `node scripts/update-obsidian-mobile.js && node scripts/patch-obsidian-mobile.js` to get Obsidian's renderer files
-2. `cd src/server && npm install && npm start`
+2. `cd src/runtime-server/server && npm install && npm start`
 3. Put it behind a reverse proxy (nginx, Caddy, Cloudflare Tunnel) with HTTPS
 4. Do not expose the server directly to the internet without auth — there is no application-level authentication
 

@@ -20,7 +20,7 @@ Browser
     ├── obsidian-desktop/  (desktop bundle)
     └── obsidian-mobile/   (mobile bundle, build-time patched)
 
-Server (src/server/)
+Server (src/runtime-server/server/)
 ├── index.js              - Express + WebSocket
 ├── vault-registry.js     - persistent recent-vault registry (user-data/registry.json)
 ├── system-plugins.js     - overlay from src/plugins/ into vault's .obsidian/plugins/
@@ -37,7 +37,7 @@ Vault
 
 ### Two parallel client runtimes — `src/client/` vs `src/client-mobile/`
 
-The same Node.js server (`src/server/`) hosts two completely separate browser
+The same Node.js server (`src/runtime-server/server/`) hosts two completely separate browser
 runtimes that share its API:
 
 | Route | Bundle loaded | Adapter chosen | Shim layer | Use case |
@@ -509,16 +509,16 @@ Add a `docs/livesync.md` guide covering:
 
 | File | Purpose |
 |------|---------|
-| `src/server/index.js` | HTTP/WS entry point; triggers bootstrap warm-up on listen |
-| `src/server/config.js` | port, host, vault path, obsidian path |
-| `src/server/vault-registry.js` | persistent recent-vault registry |
-| `src/server/system-plugins.js` | overlay from `src/plugins/` into vault's `.obsidian/plugins/` |
-| `src/server/api/bootstrap.js` | single-shot preload endpoint; server-side mtime cache; pre-compression |
-| `src/server/api/vaults.js` | vault list/open/remove/move API |
-| `src/server/api/fs.js` | REST file ops (scoped per vault id) |
-| `src/server/api/electron.js` | sendSync channel handlers |
-| `src/server/api/proxy.js` | outbound HTTP proxy for Obsidian release/asset hosts |
-| `src/server/api/watch.js` | chokidar bridge (per-connection vault watcher) |
+| `src/runtime-server/server/index.js` | HTTP/WS entry point; triggers bootstrap warm-up on listen |
+| `src/runtime-server/server/config.js` | port, host, vault path, obsidian path |
+| `src/runtime-server/server/vault-registry.js` | persistent recent-vault registry |
+| `src/runtime-server/server/system-plugins.js` | overlay from `src/plugins/` into vault's `.obsidian/plugins/` |
+| `src/runtime-server/server/api/bootstrap.js` | single-shot preload endpoint; server-side mtime cache; pre-compression |
+| `src/runtime-server/server/api/vaults.js` | vault list/open/remove/move API |
+| `src/runtime-server/server/api/fs.js` | REST file ops (scoped per vault id) |
+| `src/runtime-server/server/api/electron.js` | sendSync channel handlers |
+| `src/runtime-server/server/api/proxy.js` | outbound HTTP proxy for Obsidian release/asset hosts |
+| `src/runtime-server/server/api/watch.js` | chokidar bridge (per-connection vault watcher) |
 | `src/client/index.html` | script load order |
 | `src/client/starter.html` | wrapped Obsidian starter entry |
 | `src/client/boot.js` | window.require, modules table, platform globals |

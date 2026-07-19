@@ -3,7 +3,7 @@
 #
 # Reads from:  src/client-mobile/ (our mobile client) + vendor/obsidian-mobile/
 #              (extracted mobile bundle — self-contained: app.js/worker.js/
-#              i18n/lib all live inside it, no dependency on vendor/obsidian).
+#              i18n/lib all live inside it, no dependency on vendor/obsidian-desktop).
 # Writes to:   .tmp/deployments/cloudflare/public/ (deployment artifacts)
 #
 # Run from the cloudflare/ directory:

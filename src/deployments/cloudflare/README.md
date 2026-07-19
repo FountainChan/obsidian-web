@@ -20,7 +20,7 @@ previous Durable Object (`VaultDO`, server-backed vault) has been **removed**.
   community-plugin browse/install, releases, templater's unsplash endpoint).
   Handled entirely at the edge (`proxy-worker.js`) — **no origin server**, no
   Durable Object, no Node process. Same allow-list + SSRF-safe manual-redirect
-  handling as the Node reference (`src/server/api/proxy.js`), ported to the
+  handling as the Node reference (`src/runtime-server/server/api/proxy.js`), ported to the
   Worker `fetch`/`Request`/`Response` runtime (no `Buffer`, chunked
   base64 — see `proxy-worker.js` header comment).
   - **Cache**: immutable downloads (`raw.githubusercontent.com`,

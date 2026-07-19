@@ -12,7 +12,7 @@
 //
 // FOLLOW-UP (per "add the other options later"): port the Node server's
 //   • /api/system-plugins        (seed manifest)
-//   • /api/system-plugin-file    (seed bytes — src/server/api/system-plugin-files.js)
+//   • /api/system-plugin-file    (seed bytes — src/runtime-server/server/api/system-plugin-files.js)
 // to Worker routes. Not needed today — cf-mobile-seed already ships a static
 // fallback (public/system-plugins/*) for both. Recommended env for CF:
 // SYSTEM_PLUGINS_SEED_DISABLED="obsidian-livesync" (LiveSync pre-installed
