@@ -6,6 +6,59 @@
 
 ---
 
+## 2026-07-19 — slice seed-demo (Commit 2/3)
+
+### ensureDemo() + /vault/<demoId>
+
+Brief: `docs/plans/seed-demo.md` §3(ג), DoD #5 (deep-link).
+
+#### מה בוצע?
+
+**`src/client-mobile/boot.js`**
+
+- `DEMO_ID` — מחושב פעם אחת מ-`window.__owConfig.demoVault.id`, נופל
+  ל-`'0000demo0000demo'` (ES5: `(window.__owConfig && window.__owConfig.demoVault
+  && window.__owConfig.demoVault.id) || '0000demo0000demo'`).
+- `ensureDemo()` — create-if-missing: אם `window.__owLocalVaults.get(DEMO_ID)`
+  ריק → `create('Demo', { id: DEMO_ID })` (מזהה קבוע, מ-Commit 1). guard
+  `demoVault.enabled===false` (תיקון-precedence סבב-2 אביגיל: `d && d.enabled
+  === false`, לא `!d.enabled ?? true` שאינו תקף בלי `??`). ברירת-מחדל: ON.
+- **לא** נקרא באופן גורף — רק כש-`VAULT_ID === DEMO_ID` (כניסה דרך
+  `/vault/<demoId>`, קישור-שיתוף). משתמש-חדש שמגיע ל-`/` בלי vault לא
+  יוצר Demo — הרשימה נשארת ריקה → onboarding נייטיבי (DoD#3, נבדק ב-Commit
+  1 האחר לא נפגע).
+- אחרי `ensureDemo()`, `VAULT_TYPE` (מחושב מיד אחרי) נופל ל-`'local'`
+  (registry lookup מוצא את הרשומה) — הכספת נפתחת דרך זרימת ה-OPFS הרגילה,
+  כולל seed guard מ-Commit 1 (כספת חדשה=ריקה → נזרעת).
+
+#### בדיקות
+
+- `bun build boot.js` → syntax תקין.
+- `bun test test/` בתוך `src/client-mobile/`: 46/46 ירוקים (ללא שינוי —
+  ensureDemo תלוי-DOM, אין הרחבת unit-test; ראה "חריגות" למטה).
+- curl ידני מול שרת מקומי (`PORT=4080 bun index.js` תחת
+  `src/runtime-server/server/`):
+  - `GET /` → 200, `window.__owConfigInjected` כולל
+    `"demoVault":{"enabled":true,"id":"0000demo0000demo"}` — מאמת שה-config
+    שממנו `DEMO_ID`/ה-guard קוראים בפועל מוזרק.
+  - `GET /vault/0000demo0000demo` → 200 (routing תקין; יצירת ה-vault בפועל
+    היא לוגיקת-דפדפן, OPFS/localStorage — לא נבדקת ב-curl).
+  - `GET /vault/somerandomid`, `GET /`, `GET /starter` → 200 (regression:
+    routing קיים לא נשבר).
+
+#### חריגות
+
+- **בדיקת דפדפן-אמיתי לא בוצעה ע"י אליעזר** — ניסיון לפתוח מנהרת tuns.sh
+  (`ssh -i ~/.ssh/pico ... tuns.sh http`) נכשל: `Load key
+  "/home/user/.ssh/pico": error in libcrypto` / `Permission denied
+  (publickey)` — תשתית (מפתח SSH), לא קשור ל-slice. `ensureDemo()`/deep-link
+  אינם ניתנים ל-unit-test (תלויים ב-`window`/`localStorage`/OPFS אמיתיים,
+  כמו שאר boot.js). הבריף עצמו מייעד את ה-commit הזה לאימות calev (`§4:
+  "(calev: deep-link פותח Demo זרוע)"`) ואת ה-slice כולו ל-calev-heavy (§8) —
+  **מתבצע בסוף ה-slice**, לא כאן.
+
+---
+
 ## 2026-07-19 — slice seed-demo (Commit 1/3)
 
 ### seed רק בכספת ריקה + create() עם id קבוע

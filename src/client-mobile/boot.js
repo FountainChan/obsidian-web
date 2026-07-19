@@ -110,6 +110,36 @@ const MOBILE_SCRIPTS = [
     return;   // מנווטים החוצה — אין מה לעשות יותר בטיק הזה
   }
 
+  // ── Demo vault — lazy create-if-missing (seed-demo §3ג) ────────────────────
+  // Fixed-id demo vault (window.__owConfig.demoVault.id, default
+  // '0000demo0000demo') — NOT registered ahead of time (brief §0 decision 2:
+  // registry stays empty for a brand-new user → native onboarding screen,
+  // not the vault-chooser, DoD#3). ensureDemo() is the only thing that ever
+  // writes the Demo's registry entry — called here for the share-link
+  // (/vault/<demoId>, DoD#5) and from the starter-screen button (installed
+  // in a later commit, DoD#4). Idempotent: get(DEMO_ID) truthy on repeat
+  // visits → no-op (the fixed id, not a fresh uuid, is what makes this work
+  // — local-vault-registry.js create() opts.id, seed-demo §3א).
+  var DEMO_ID = (window.__owConfig && window.__owConfig.demoVault && window.__owConfig.demoVault.id) || '0000demo0000demo';
+  function ensureDemo() {
+    // ES5 guard, avigail round-2 fix (precedence bug in the brief's draft
+    // pseudocode `!d.enabled ?? true`, which isn't even valid without `??`):
+    // `d && d.enabled === false` — explicit opt-out only; missing config or
+    // missing `enabled` key both default to "on".
+    var d = window.__owConfig && window.__owConfig.demoVault;
+    if (d && d.enabled === false) return null;
+    if (window.__owLocalVaults && !window.__owLocalVaults.get(DEMO_ID)) {
+      window.__owLocalVaults.create('Demo', { id: DEMO_ID });
+    }
+    return DEMO_ID;
+  }
+
+  // /vault/<demoId> — share-link (DoD#5): create-if-missing on first visit;
+  // repeat visits find the registry entry already there (idempotent, no-op).
+  // Once created, VAULT_TYPE below resolves to 'local' (registry lookup
+  // succeeds) instead of falling back to 'server' for an unknown id.
+  if (VAULT_ID === DEMO_ID) ensureDemo();
+
   // Vault type: 'local' (OPFS, no server round-trip), 'folder' (real
   // directory picked via showDirectoryPicker, also OPFS-store-backed — see
   // capacitor-shim's fsBackend), or 'server' (HTTP /api/fs). Determined by
