@@ -53,7 +53,7 @@ const CACHE = 'ow-sw-' + BUILD_ID;
 // Window context (spec) — a Service Worker has neither a Window nor
 // activation, so it cannot itself (re-)request the grant even if OPFS-style
 // direct access worked mechanically. → folder vaults use the RPC fallback
-// (§3ד, next-next commit): the SW asks the already-open page, which already
+// (§3ד, `owresRpcRead` below): the SW asks the already-open page, which already
 // holds the permission-granted handle (`window.__owFolderRoot`, granted via
 // a real user gesture in `boot.js`'s `showGrantScreen`).
 //
@@ -121,10 +121,39 @@ function owresOpfsRead(vaultId, relPath) {
     .then((fh) => fh.getFile());
 }
 
+// 'folder' vault — RPC to the page (§3ד, spike #2: SW can't itself hold the
+// FS-Access permission grant — requestPermission needs a user-activated
+// Window). One hop over MessageChannel: the page answers using the
+// already-granted `window.__owFolderRoot` it holds in memory (boot.js
+// listener), not a fresh handle re-loaded from IndexedDB (finding 3 — a
+// freshly-loaded handle could still need a permission re-check).
+function owresRpcRead(vaultId, relPath) {
+  return self.clients.matchAll({ type: 'window' }).then((clients) => {
+    if (!clients || clients.length === 0) throw new Error('no page client for RPC');
+    const client = clients[0];
+    return new Promise((resolve, reject) => {
+      const mc = new MessageChannel();
+      mc.port1.onmessage = (ev) => {
+        const msg = ev.data || {};
+        if (msg.ok) resolve(msg);
+        else reject(new Error(msg.error || 'owres RPC failed'));
+      };
+      client.postMessage({ type: 'ow-res', vaultId, realRel: relPath }, [mc.port2]);
+    });
+  }).then((msg) => ({
+    // File-like surface (name/size/slice/getFile not needed — buildOwResResponse
+    // only touches .size + .slice()), so buildOwResResponse works unmodified
+    // for either an OPFS `File` or this RPC result.
+    size: msg.buffer.byteLength,
+    slice: (start, end) => msg.buffer.slice(start, end),
+  }));
+}
+
 function handleOwRes(req, url) {
   const parsed = normalizeOwResPath(url.pathname);
   if (!parsed) return Promise.resolve(new Response('Not found', { status: 404 }));
   return owresOpfsRead(parsed.vaultId, parsed.realRel)
+    .catch(() => owresRpcRead(parsed.vaultId, parsed.realRel))   // not an OPFS ('local') vault → try folder RPC
     .then((file) => buildOwResResponse(file, parsed.realRel, req))
     .catch(() => new Response('Not found', { status: 404 }));
 }
@@ -155,7 +184,10 @@ function buildOwResResponse(file, relPath, req) {
       }
     }
   }
-  return new Response(file, {
+  // full body — `.slice(0, size)` (not the bare `file`) so this also works
+  // for the RPC's plain {size,slice} wrapper (folder vaults), not just a
+  // real OPFS `File`/Blob.
+  return new Response(file.slice(0, size), {
     status: 200,
     headers: { 'Content-Type': mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' },
   });

@@ -152,6 +152,44 @@ const MOBILE_SCRIPTS = [
   window.__owVaultId   = VAULT_ID;
   console.log('[obsidian-web] vault type:', VAULT_TYPE, 'id:', VAULT_ID);
 
+  // ── /_owres/ folder-vault RPC responder (sw-vault-resources §3ד) ─────────
+  // The SW's `/_owres/` handler (sw.js) can read OPFS ('local' vaults)
+  // directly, but a 'folder' vault's FileSystemDirectoryHandle needs FS
+  // Access permission — `queryPermission`/`requestPermission` require a
+  // user-activated Window, which a Service Worker doesn't have (spike #2,
+  // §0.1). So for folder vaults the SW asks *this* page instead: one hop via
+  // MessageChannel. Answers with the already permission-granted
+  // `window.__owFolderRoot` (set once, via a real user gesture, by
+  // showGrantScreen below) — not a fresh handle re-loaded from IndexedDB,
+  // which could still need a permission re-check (finding 3, brief §3ד).
+  // Registered unconditionally (cheap no-op for 'local'/'server' vaults —
+  // just an early-return on vaultId/type mismatch) since VAULT_TYPE is known
+  // synchronously here but __owFolderRoot is only set later, once the grant
+  // resolves (verifyPromise below) — the listener checks it at call-time.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function (ev) {
+      var msg = ev.data;
+      if (!msg || msg.type !== 'ow-res') return;
+      var port = ev.ports && ev.ports[0];
+      if (!port) return;
+      if (msg.vaultId !== VAULT_ID || VAULT_TYPE !== 'folder' || !window.__owFolderRoot) {
+        port.postMessage({ ok: false, error: 'no matching granted folder vault' });
+        return;
+      }
+      var parts = String(msg.realRel || '').split('/').filter(function (p) { return p.length > 0; });
+      var name = parts.pop();
+      var cur = Promise.resolve(window.__owFolderRoot);
+      parts.forEach(function (part) {
+        cur = cur.then(function (dir) { return dir.getDirectoryHandle(part, { create: false }); });
+      });
+      cur.then(function (dir) { return dir.getFileHandle(name, { create: false }); })
+        .then(function (fh) { return fh.getFile(); })
+        .then(function (file) { return file.arrayBuffer(); })
+        .then(function (buf) { port.postMessage({ ok: true, buffer: buf }, [buf]); })
+        .catch(function (e) { port.postMessage({ ok: false, error: String((e && e.message) || e) }); });
+    });
+  }
+
   // (הוסר guard-הפניה ל-/starter כש-VAULT_ID ריק — brief §3א: no-vault
   // מזריק עכשיו את מסך-הפתיחה הנייטיב במקום redirect. /starter עדיין מטופל
   // בהמשך, אחרי setup ה-shims — ראה guard #2 למטה.)
