@@ -1,0 +1,51 @@
+/**
+ * overrides.css
+ *
+ * CSS-only overrides על גבי הבאנדל הנייטיב (vendor/obsidian-mobile/app.css) —
+ * מטרה: על מסך רחב (720-899px, מתחת לסף layout-switch של 900 — ראה
+ * client-mobile/boot.js) הכפתורים בפריסת-המובייל רחוקים זה מזה, כי המסכים
+ * הנייטיביים (onboarding/chooser) ממורכזים אבל עדיין רחבים/עם ניווט בפינה.
+ * ראה docs/plans/mobile-layout-wide.md (docs-repo).
+ *
+ * לא נוגע בבאנדל, ב-JS, או בלוגיקת isPhone/layout — CSS בלבד, נטען **אחרי**
+ * app.css ב-index.html (order + specificity גוברים).
+ *
+ * ── ממצאי spike (dev preview, ~800px, Chromium headless) ────────────────────
+ * (1) `.mobile-vault-chooser-content` — מסך "Obsidian" (רשימת vaults/Create
+ *     new vault/Open folder). כבר ממורכז (`margin:0 auto`) אבל max-width:800px
+ *     → ברוחב 800-1280 השורות פרושות מקצה לקצה. תוקן ל-480px.
+ * (2) `.mobile-onboarding-navbar .back-button` — מסך נפרד (onboarding/setup,
+ *     למשל "Where is your vault located?"). ה-navbar עצמו הוא
+ *     `position:fixed; width:100%` (לא ה-back-button) — לכן back נשאר בפינה
+ *     השמאלית-העליונה גם כש-`.mobile-onboarding-screen` הפנימי כבר ממורכז
+ *     ל-540px. מדידה אמפירית ב-800px: back היה ב-x=40 בעוד תוכן ב-x≈154 (פער
+ *     ~114px). תוקן ע"י מיקום ה-navbar עצמו (`max-width:540` תואם ל-
+ *     `.mobile-onboarding-screen`, עם `left:0;right:0;margin:0 auto` —
+ *     נדרש כי `margin:auto` על position:fixed לא ממרכז בלי left/right
+ *     מפורשים) — אחרי התיקון: navbar ב-x≈130, back ב-x≈170, תוכן ב-x≈154.5
+ *     (פער ~15.5px, סמוך). נבדק גם ב-1280px — מרכוז יחסי, לא ערך-קבוע.
+ * (3) סף media: 720px (לא 900) — 900 הוא סף layout-switch (boot.js,
+ *     isMobile↔desktop). ב-720-899 עדיין mobile layout; ב-390 (פלאפון) המדיה
+ *     לא חלה כלל — ללא שינוי.
+ * (4) `.mobile-onboarding-screen` (540) — כבר ממורכז כראוי ב-1280 בלי צורך
+ *     בצמצום נוסף; הבעיה הייתה רק ה-navbar החיצוני-לו.
+ */
+
+@media (min-width: 720px) {
+  /* מסך vault-chooser ("Obsidian" / רשימת vaults) — צמצום מ-800 ל-480 כדי
+     שהשורות (Setup Sync / Create new vault / vaults קיימים) לא יפרשו מקצה
+     לקצה על מסך רחב. */
+  .mobile-vault-chooser-content {
+    max-width: 480px;
+  }
+
+  /* מסכי onboarding/setup (למשל "Where is your vault located?") — מרכוז
+     ה-navbar (position:fixed) לרוחב-התוכן (540, זהה ל-.mobile-onboarding-screen)
+     כדי ש-"Back" ישב סמוך לתוכן במקום בפינת-המסך. */
+  .mobile-onboarding-navbar {
+    max-width: 540px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+  }
+}
