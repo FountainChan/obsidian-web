@@ -142,12 +142,20 @@ const MOBILE_SCRIPTS = [
   // אחרי ברירות המחדל. מה שמוגדר כאן מנצח.
   //
   // המצב נשמר ב-localStorage תחת המפתח 'obsidian-web:layout-mode'.
+  // deploy-config.md §3(ג): layout.default הוא ה-fallback כשאין עדיין
+  // localStorage pref אישי (פורס יכול לקבוע ברירת-מחדל 'mobile'/'desktop'/
+  // 'auto' לפריסה שלו); layout.threshold מחליף את סף ה-900px הקשיח
+  // (innerHeight<600 נשאר קבוע — §3(ג) בבריף מחווט רק default/threshold).
+  // ES5 guard pattern (avigail): (window.__owConfig && window.__owConfig.X).
   function computeLayoutMode() {
-    var pref = localStorage.getItem('obsidian-web:layout-mode') || 'auto';
+    var cfg = (window.__owConfig && window.__owConfig.layout) || {};
+    var defaultMode = cfg.default || 'auto';
+    var threshold = (typeof cfg.threshold === 'number') ? cfg.threshold : 900;
+    var pref = localStorage.getItem('obsidian-web:layout-mode') || defaultMode;
     if (pref === 'mobile')  return { isMobile: true,  reason: 'user-pref-mobile' };
     if (pref === 'desktop') return { isMobile: false, reason: 'user-pref-desktop' };
     // 'auto' — viewport-based decision
-    var small = window.innerWidth < 900 || window.innerHeight < 600;
+    var small = window.innerWidth < threshold || window.innerHeight < 600;
     return { isMobile: small, reason: 'auto-' + (small ? 'mobile' : 'desktop') };
   }
   var layout = computeLayoutMode();
@@ -676,7 +684,11 @@ const MOBILE_SCRIPTS = [
       // fetch מחזיר 404 ו-seedExampleVault מדלג). לא נוגע ב-.obsidian/ (finding
       // 1 בבריף — הקונפיג בבלעדיות של seedSystemPlugins למעלה). לא חוסם את
       // הפתיחה אם נכשל. ראה docs/plans/cf-mobile-seed.md §3ג.
-      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedExampleVault) {
+      // deploy-config.md §3(ג): המתג seedExampleContent (ברירת-מחדל true —
+      // התנהגות היום, DoD#2/#5) — ES5 guard pattern (avigail):
+      // (window.__owConfig && window.__owConfig.X).
+      if ((VAULT_TYPE === 'local' || VAULT_TYPE === 'folder') && window.__owOpfsStore && window.__owSeedExampleVault
+          && (window.__owConfig && window.__owConfig.seedExampleContent)) {
         var gr2 = VAULT_TYPE === 'folder' ? (async () => window.__owFolderRoot) : undefined;
         try { await window.__owSeedExampleVault.seedExampleVault(window.__owOpfsStore.makeStore(VAULT_ID, { getRoot: gr2 })); }
         catch (e) { console.warn('[ow] seed example vault failed', e); }
