@@ -14,13 +14,13 @@ previous Durable Object (`VaultDO`, server-backed vault) has been **removed**.
   engine); 0 dependency on `/api/*` for vault storage.
 - `vendor/obsidian-mobile/` is self-contained (own `app.js`/`worker.js`/`i18n`/
   `lib`) — `build-assets.sh` copies it (and mirrors its resource dirs at the
-  bundle root) without touching `vendor/obsidian` (desktop).
+  bundle root) without touching `vendor/obsidian-desktop` (desktop).
 - **`POST /api/proxy-request`** — edge Worker proxy for outbound requests
   Obsidian makes that need CORS the origin doesn't send (GitHub/obsidian.md —
   community-plugin browse/install, releases, templater's unsplash endpoint).
   Handled entirely at the edge (`proxy-worker.js`) — **no origin server**, no
   Durable Object, no Node process. Same allow-list + SSRF-safe manual-redirect
-  handling as the Node reference (`src/server/api/proxy.js`), ported to the
+  handling as the Node reference (`src/runtime-server/server/api/proxy.js`), ported to the
   Worker `fetch`/`Request`/`Response` runtime (no `Buffer`, chunked
   base64 — see `proxy-worker.js` header comment).
   - **Cache**: immutable downloads (`raw.githubusercontent.com`,
@@ -96,7 +96,7 @@ wired yet** — follow-up, see below. Do **not** delete `template.js`.
 3. Two font files referenced by `obsidian-mobile/app.css` ("Inter",
    `public/fonts/*.woff2`) 404 — `vendor/obsidian-mobile` never included a
    `public/` dir. Cosmetic only (`font-display: swap` → system font fallback);
-   does not block rendering. Not a `vendor/obsidian` dependency (path is under
+   does not block rendering. Not a `vendor/obsidian-desktop` dependency (path is under
    `/obsidian-mobile/` already) — just an incomplete upstream extraction.
 4. `/api/proxy-request` is verified via a **Bun integration test** against the
    real network (manifest fetch, release-asset redirect, SSRF, cache) — not

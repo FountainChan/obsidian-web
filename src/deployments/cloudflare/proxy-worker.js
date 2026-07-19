@@ -1,4 +1,4 @@
-// Cloudflare Worker port of src/server/api/proxy.js — outbound HTTP proxy for
+// Cloudflare Worker port of src/runtime-server/server/api/proxy.js — outbound HTTP proxy for
 // requests Obsidian initiates via ipcRenderer.send("request-url", ...). The
 // browser cannot make these requests directly because external servers (e.g.
 // releases.obsidian.md, GitHub) do not send CORS headers. capacitor-shim.js
@@ -11,7 +11,7 @@
 //           not just for binary payloads).
 //
 // Same allow-list + SSRF guard + redirect handling as the Node proxy — see
-// src/server/api/proxy.js for the reference implementation this was ported
+// src/runtime-server/server/api/proxy.js for the reference implementation this was ported
 // from. Differences are Worker-runtime constraints only (no Buffer/Node http,
 // manual redirect handling via fetch({redirect:'manual'}), Cache API instead
 // of an in-process cache).

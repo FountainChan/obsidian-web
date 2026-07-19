@@ -107,11 +107,11 @@ function loadModuleWithDirs(srcPluginsDir, vendorPluginsDir) {
   // Build patched source: replace the two path.resolve lines.
   const patchedSource = originalSource
     .replace(
-      /const SYSTEM_PLUGINS_DIR = path\.resolve\(__dirname, '\.\.', 'plugins'\);/,
+      /const SYSTEM_PLUGINS_DIR = path\.resolve\(__dirname, '\.\.', '\.\.', 'plugins'\);/,
       `const SYSTEM_PLUGINS_DIR = ${JSON.stringify(srcPluginsDir)};`,
     )
     .replace(
-      /const VENDOR_PLUGINS_DIR = path\.resolve\(__dirname, '\.\.', '\.\.', 'vendor', 'plugins'\);/,
+      /const VENDOR_PLUGINS_DIR = path\.resolve\(__dirname, '\.\.', '\.\.', '\.\.', 'vendor', 'plugins'\);/,
       `const VENDOR_PLUGINS_DIR = ${JSON.stringify(vendorPluginsDir)};`,
     );
 

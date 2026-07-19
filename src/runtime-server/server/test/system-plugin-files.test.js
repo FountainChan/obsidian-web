@@ -72,7 +72,7 @@ test('GET /api/system-plugin-file serves a real system plugin file', async (t) =
   const body = await res.text();
 
   const expected = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'plugins', 'obsidian-web-layout', 'main.js'),
+    path.join(__dirname, '..', '..', '..', 'plugins', 'obsidian-web-layout', 'main.js'),
     'utf8',
   );
   assert.equal(body, expected);

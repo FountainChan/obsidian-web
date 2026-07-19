@@ -1,7 +1,7 @@
 const path = require('path');
 
-// Repo root — two levels up from src/server/.
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+// Repo root — three levels up from src/runtime-server/server/.
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 // Single source of truth for the Obsidian app version we ship.
 // Both bootstrap.js and electron.js import this instead of hardcoding it.
