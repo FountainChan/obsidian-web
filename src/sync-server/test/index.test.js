@@ -122,3 +122,39 @@ test('boot fail-closed: VAULT_PATH unset -> process exits before listening', asy
   assert.notEqual(exitCode, 0);
   assert.match(stderr, /VAULT_PATH/);
 });
+
+test('boot fail-closed: VAULT_PATH pointing at a nonexistent path -> process exits before listening (calev-heavy finding 1)', async (t) => {
+  const env = {
+    ...process.env,
+    SYNC_TOKEN: TOKEN,
+    VAULT_PATH: path.join(os.tmpdir(), 'sync-server-definitely-does-not-exist-' + Date.now()),
+  };
+
+  const child = spawn('bun', [path.join(__dirname, '..', 'index.js')], { env, stdio: 'pipe' });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+  const exitCode = await new Promise((resolve) => child.on('exit', resolve));
+  t.after(() => { try { child.kill(); } catch (_) { /* already dead */ } });
+
+  assert.notEqual(exitCode, 0);
+  assert.match(stderr, /VAULT_PATH does not exist/);
+});
+
+test('boot fail-closed: VAULT_PATH pointing at a file (not a directory) -> process exits before listening (calev-heavy finding 1)', async (t) => {
+  const notADir = path.join(os.tmpdir(), 'sync-server-vault-path-is-a-file-' + Date.now());
+  await fsp.writeFile(notADir, 'not a directory');
+  t.after(() => fsp.rm(notADir, { force: true }));
+
+  const env = { ...process.env, SYNC_TOKEN: TOKEN, VAULT_PATH: notADir };
+
+  const child = spawn('bun', [path.join(__dirname, '..', 'index.js')], { env, stdio: 'pipe' });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+  const exitCode = await new Promise((resolve) => child.on('exit', resolve));
+  t.after(() => { try { child.kill(); } catch (_) { /* already dead */ } });
+
+  assert.notEqual(exitCode, 0);
+  assert.match(stderr, /VAULT_PATH is not a directory/);
+});

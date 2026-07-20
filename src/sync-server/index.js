@@ -5,6 +5,7 @@
 // static/serverless; this server is optional, run by whoever wants to
 // expose a vault directory for the OPFS sync client to pull from).
 
+const fs = require('fs');
 const express = require('express');
 
 const { createAuthMiddleware } = require('./auth');
@@ -61,6 +62,21 @@ function startServer() {
   const vaultPath = process.env.VAULT_PATH;
   if (!vaultPath) {
     console.error('[sync-server] VAULT_PATH is required — refusing to start.');
+    process.exit(1);
+  }
+  // Validity, not just presence (calev-heavy finding 1): a typo'd/missing
+  // VAULT_PATH must not boot successfully and then fail per-request — fail
+  // closed here too, before listen(), so a bad path is caught immediately
+  // instead of silently degrading every request to a 500 later.
+  let vaultStat;
+  try {
+    vaultStat = fs.statSync(vaultPath);
+  } catch (err) {
+    console.error(`[sync-server] VAULT_PATH does not exist: ${vaultPath} (${err.message})`);
+    process.exit(1);
+  }
+  if (!vaultStat.isDirectory()) {
+    console.error(`[sync-server] VAULT_PATH is not a directory: ${vaultPath}`);
     process.exit(1);
   }
 
