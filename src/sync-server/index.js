@@ -12,6 +12,7 @@ const { createAuthMiddleware } = require('./auth');
 const { createManifestService, createManifestRouter } = require('./manifest');
 const { createBlobRouter } = require('./blob');
 const { createStubRouter } = require('./stubs-v2');
+const { createCorsMiddleware } = require('./cors');
 
 function createApp({ vaultPath, syncToken }) {
   if (!vaultPath) throw new Error('vaultPath is required');
@@ -29,6 +30,18 @@ function createApp({ vaultPath, syncToken }) {
   syncRouter.use(createBlobRouter(vaultPath, manifestService));
   syncRouter.use(createStubRouter());
 
+  // CORS (brief sync-server-cors §3א) — app-level, mounted BEFORE
+  // app.use('/sync/v1', syncRouter): the auth middleware lives *inside*
+  // syncRouter, so a request that never reaches syncRouter never touches
+  // auth/FS. The browser's OPTIONS preflight (sent without Authorization)
+  // must succeed WITHOUT hitting auth, or cross-origin fetch() never gets
+  // to send the real GET. `preflight` is O(1) — no FS, no vault walk — so
+  // this preserves the DDoS posture: flooding OPTIONS costs ~nothing, same
+  // as flooding wrong tokens costs auth.js. GET/PUT still go through
+  // syncRouter -> auth first, unaffected.
+  const { cors, preflight } = createCorsMiddleware();
+  app.use(cors);
+  app.options('/sync/v1/*', preflight);
   app.use('/sync/v1', syncRouter);
 
   // Generic error handler — keep response bodies free of stack traces /
@@ -81,12 +94,16 @@ function startServer() {
   }
 
   const port = Number(process.env.PORT) || 4000;
-  // brief §3ד (avigail finding 3): sync-server is meant to be exposed to
-  // remote clients (that's the whole point — pulling a vault from another
-  // device), so HOST defaults to 0.0.0.0. It's protected only by
-  // SYNC_TOKEN, hence the emphasis on the auth being O(1)/constant-time/
-  // fail-closed above. HOST=127.0.0.1 restricts to localhost-only.
-  const host = process.env.HOST || '0.0.0.0';
+  // brief sync-server-cors §3ב: sync-server is meant to be reached from
+  // another device (that's the whole point — pulling a vault remotely),
+  // but the recommended way to expose it is a tunnel (cloudflared,
+  // `ssh -R`, tailscale, ...) terminating on localhost — NOT binding
+  // directly to all interfaces. HOST therefore defaults to 127.0.0.1
+  // (localhost-only bind); the tunnel is what makes it reachable from
+  // outside. Set HOST=0.0.0.0 to bind all interfaces directly instead (see
+  // the security warning below and in README.md — SYNC_TOKEN is still the
+  // only thing standing between an attacker and the vault in that case).
+  const host = process.env.HOST || '127.0.0.1';
   if (host === '0.0.0.0') {
     console.warn(
       '[sync-server] listening on 0.0.0.0 (all interfaces) — protected only by ' +
