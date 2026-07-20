@@ -17,6 +17,20 @@
 - טבלת-החלטה hash-based (6 שורות): `L==R`→skip; `L==⊥`→download; `L!=R,S==⊥`→conflictSkip (מגן);
   `L==S,R!=S`→download; `L!=S,R==S`→skip; שניהם השתנו→conflictSkip.
 
+## 2026-07-20 — sync-server-cors: CORS חוצה-origin + HOST default 127 (fast-follow)
+
+### רציונל
+calev (server-sync-pull) גילה שהתרחיש "מכשיר שני מסתנכרן" חוצה-origin (app על pages.dev ↔ sync-server אצל
+המשתמש) נכשל ב-CORS preflight. תיקון: sync-server ישלח `Access-Control-*` ויטפל ב-OPTIONS.
+
+### החלטות (מאושרות ע"י המשתמשת)
+- **CORS DDoS-safe**: OPTIONS-preflight app-level **לפני** ה-syncRouter (ה-auth בתוכו) — O(1), בלי FS. הצפת-OPTIONS
+  = ~0 עבודה (כמו 401). GET עדיין מאחורי token.
+- **`Access-Control-Allow-Origin: *` בטוח**: הלקוח שולח Bearer-header, לא cookies → אין credentials → אין leak.
+  קונפיגורבילי להצרה (`SYNC_CORS_ORIGIN`).
+- **HOST default → 127.0.0.1**: המשתמשת חושפת דרך **מנהרה** (cloudflared/ssh-R/tailscale), לא bind-0.0.0.0 ישיר.
+  0.0.0.0 נשאר אפשרי בקונפיג (`HOST=0.0.0.0`).
+
 ## 2026-07-20 — מנוע-סנכרון OPFS↔שרת: ארכיטקטורה + פרוטוקול (sync-server + server-sync-pull)
 
 ### רציונל
