@@ -146,6 +146,27 @@
     return e;
   }
 
+  // ── opfs-ux: native vault-chooser bridge helpers ────────────────────────
+  // The native `.mobile-vault-chooser-screen` (obsidian-mobile/app.js) both
+  // (a) validates every entry of its vault list via Filesystem.stat(id) —
+  // executor spike found this uses RAW path/id strings, not
+  // {name,location,storageType} objects as originally assumed — and
+  // (b) calls Filesystem.stat() again as part of register()'s open-flow
+  // (both "Open folder as vault" and "Open vault" on an existing row).
+  // We seed the list (boot.js's seedNativeVaultList) with '<id>/<name>'
+  // strings; this recognizes either form and confirms it's one of ours.
+  // Only relevant with no vault active (this bridge only matters for the
+  // no-vault chooser screen — never for a real, already-open vault).
+  function owResolveNativeVaultId(p) {
+    if (getVaultId() || !p) return null;   // real vault active — not our bridge's business
+    const slash = p.indexOf('/');
+    const id = slash !== -1 ? p.slice(0, slash) : p;
+    if (window.__owLocalVaults && window.__owLocalVaults.get(id)) return id;
+    let known = [];
+    try { known = JSON.parse(localStorage.getItem('ow-known-vault-ids') || '[]'); } catch (e) {}
+    return known.indexOf(id) !== -1 ? id : null;
+  }
+
   // ── Bootstrap cache invalidation wrappers ────────────────────────────
   // Each mutation method calls these so the in-memory cache populated by
   // boot.js stays in sync with what's on disk. No-ops when the cache is
@@ -268,6 +289,29 @@
     },
 
     async mkdir(opts) {
+      // ── רשת-ביטחון ל"Create a vault" הנייטיב ──────────────────────────────
+      // כשאין vault פעיל (window.__owVaultId ריק — boot לא פתר vault), mkdir
+      // הוא ה-onCreateVault הנייטיב שיוצר את ה-vault החדש. על פריסת CF/serverless
+      // אין /api/fs → הוא היה מחזיר 405; וה-DOM interceptor (boot.js) שביר על
+      // פני וריאציות מסך/אירוע/timing (.mobile-onboarding מול .mobile-vault-
+      // chooser-screen; pointerup מול click). כאן, ברמת ה-FS, תופסים בוודאות:
+      // יוצרים OPFS vault (בשם הסגמנט האחרון של הנתיב) ומנווטים אליו. מתואם עם
+      // ה-DOM interceptor דרך window.__owCreatingVault (one-shot משותף → לא כפול).
+      if (!window.__owVaultId && window.__owLocalVaults && !window.__owCreatingVault) {
+        window.__owCreatingVault = true;
+        try {
+          const raw = (opts && opts.path) || '';
+          const name = raw.split('/').filter(Boolean).pop() || 'Untitled';
+          const id = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
+          // path-based routing (slice url-routing): boot מתעלם מ-?vault= — חייב /vault/<id>
+          // (call-site זה נשמט ב-migration; הנתיב הזה רץ בדיוק על CF serverless — יעד ה-deploy).
+          window.location.href = '/vault/' + encodeURIComponent(id);
+          return {};   // "הצלחה" — הניווט גובר על המשך הזרימה הנייטיבית
+        } catch (e) {
+          window.__owCreatingVault = false;   // כשל → נופלים חזרה לניסיון-שרת
+        }
+      }
+
       const p = fullPath(opts);
       const res = await fetch('/api/fs/mkdir', {
         method: 'POST',
@@ -308,6 +352,17 @@
     async readdir(opts) {
       const p = fullPath(opts);
 
+      // opfs-ux: no vault active + browsing the External/root — this is the
+      // native mobile-vault-chooser-screen's supplemental "show subfolders
+      // not already in the vault list" scan (readdir(External,"") — brief
+      // §0 spike, gap 2). We have no real "device filesystem" to browse; a
+      // plain round-trip would hit whatever vault the server treats as
+      // default and show ITS subdirectories as fake vaults. Return empty —
+      // seedNativeVaultList()/Lte (mobile-external-vaults) is the real list.
+      if (!getVaultId() && p === '') {
+        return { files: [] };
+      }
+
       if (window.__owBootstrapLookup) {
         const hit = window.__owBootstrapLookup.lookupDir(window.__owBootstrapCache, p);
         if (hit) return { files: hit };
@@ -324,6 +379,16 @@
 
     async stat(opts) {
       const p = fullPath(opts);
+
+      // opfs-ux: recognize our own vault ids (local/folder registry or
+      // server registry, via ow-known-vault-ids) — see owResolveNativeVaultId
+      // above. Needed both for the native list's per-entry validation
+      // (Ote.stat(id) in the chooser screen — brief §0 spike) and for the
+      // "Open folder as vault"/"Open vault" register() flow's own stat()
+      // check. No round-trip: there's no active vault yet to ask the server.
+      if (owResolveNativeVaultId(p) !== null) {
+        return { type: 'directory', size: 0, mtime: 0, ctime: 0, uri: '' };
+      }
 
       if (window.__owBootstrapLookup) {
         const hit = window.__owBootstrapLookup.lookupStat(window.__owBootstrapCache, p);
@@ -396,7 +461,27 @@
     async checkPerms()        { return { publicStorage: 'granted' }; },
     async requestPermissions(){ return { publicStorage: 'granted' }; },
     async requestPerms()      { return { publicStorage: 'granted' }; },
-    async choose()            { return null; },  // Android file picker — not supported
+    // opfs-ux: File System Access API polyfill for the native "Open folder
+    // as vault" flow (brief §3ג). Chromium-only (feature-detected below —
+    // the native onClick handler treats a thrown Error whose message
+    // contains "canceled" as a silent user-cancel, same as picker abort).
+    // Reuses folder-vault's registry (__owLocalVaults) + handle store
+    // (__owFolderHandles) — id/name format matches seedNativeVaultList()'s
+    // 'id/name' convention so the native path-resolver (Android:
+    // e.contains('/') routes to the External fs instance) AND our own
+    // owResolveNativeVaultId() both parse it consistently.
+    async choose() {
+      if (!('showDirectoryPicker' in window)) throw capError('UNSUPPORTED', 'canceled: not supported');
+      let dir;
+      try {
+        dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (e) {
+        throw capError('CANCELED', 'canceled');   // picker dismissed/denied — native swallows this silently
+      }
+      const created = window.__owLocalVaults.create(dir.name, { type: 'folder' });
+      await window.__owFolderHandles.saveHandle(created.id, dir);
+      return { path: created.id + '/' + created.name, isRoot: false };
+    },
 
     async getUri(opts) {
       const p = fullPath(opts);
@@ -539,7 +624,7 @@
   const OPFS_PATH_METHODS = ['readFile', 'writeFile', 'appendFile', 'deleteFile', 'mkdir', 'rmdir', 'readdir', 'stat', 'getUri'];
 
   function wrapOpfsWithFullPath(store) {
-    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, setTimes, trash, ...)
+    const wrapped = Object.create(store); // passthrough for the rest (watchAndStatAll, startWatch, stopWatch, addListener, rescan, setTimes, trash, ...)
     for (const m of OPFS_PATH_METHODS) {
       if (typeof store[m] !== 'function') continue;
       wrapped[m] = (opts) => store[m](Object.assign({}, opts, { path: fullPath(opts) }));
@@ -560,16 +645,27 @@
     return wrapped;
   }
 
-  // ── Filesystem dispatcher (local ↔ server) ──────────────────────────────
+  // ── Filesystem dispatcher (local ↔ server ↔ folder) ──────────────────────
   // window.__owVaultType is set by boot.js (mobile) at call-time — evaluated
   // per-call, not once at load-time. boot.js runs AFTER this script (see
   // index.html loading order), so by the time Obsidian actually calls
   // Filesystem.readFile etc., boot.js has already set __owVaultType. See
   // docs/plans/opfs-wire.md §3 (Architecture diagram, "תובנת-מפתח").
+  //
+  // 'folder' vaults re-use the same OpfsStore as 'local' (OPFS) vaults — just
+  // with a pluggable getRoot that returns the picked FileSystemDirectoryHandle
+  // (window.__owFolderRoot, set by boot.js's permission-gated verify step)
+  // instead of navigator.storage.getDirectory()/vaults/<id>. See
+  // docs/plans/folder-vault.md §3ה. `isFolder: true` additionally gates
+  // OpfsStore's external-change watch (docs/plans/folder-watch.md §2) —
+  // 'local' (OPFS) vaults must stay a watch no-op (DoD#4).
   function fsBackend() {
-    if (window.__owVaultType === 'local') {
+    const t = window.__owVaultType;
+    if (t === 'local' || t === 'folder') {
       if (!window.__owLocalFs) {
-        window.__owLocalFs = wrapOpfsWithFullPath(window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId()));
+        const getRoot = t === 'folder' ? (async () => window.__owFolderRoot) : undefined;
+        window.__owLocalFs = wrapOpfsWithFullPath(
+          window.__owOpfsStore.makeStore(window.__owVaultId || getVaultId(), { getRoot, isFolder: t === 'folder' }));
       }
       return window.__owLocalFs;
     }
@@ -642,6 +738,33 @@
     isInstalledFromStore: () => Promise.resolve({ isFromStore: false }),
     async requestUrl(opts) {
       const { url, method, contentType, headers, body, binary } = opts;
+
+      // ── Selective server-proxy for Obsidian-infra hosts ────────────────────
+      // GitHub / obsidian.md release + community-plugin downloads either lack
+      // CORS or 302-redirect to a non-CORS CDN, so a direct browser fetch fails.
+      // Route ONLY those hosts through /api/proxy-request (server follows
+      // redirects, no CORS restriction). Everything else — CouchDB/LiveSync,
+      // the user's own hosts — stays a DIRECT fetch, so the server is never in
+      // the sync data path (preserves the direct-fetch sync architecture).
+      let __owHost = '';
+      try { __owHost = new URL(url, location.href).hostname; } catch (_) {}
+      if (/(^|\.)(github\.com|githubusercontent\.com|obsidian\.md)$/.test(__owHost)) {
+        const pr = await fetch('/api/proxy-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // body/binary pass straight through: the proxy decodes
+          // binary?base64:utf8 (matches Obsidian's requestUrl body contract).
+          body: JSON.stringify({
+            url, method: method || 'GET', headers: headers || {},
+            contentType, body: body != null ? body : undefined, binary: !!binary,
+          }),
+        });
+        const j = await pr.json().catch(() => ({}));
+        if (!pr.ok) throw capError(j.code || 'EIO', j.error || 'proxy-request failed: ' + url);
+        // proxy returns {status, headers, body(base64)} — the exact shape Obsidian expects.
+        return { status: j.status, headers: j.headers || {}, body: j.body || '' };
+      }
+
       const reqHeaders = Object.assign({}, headers || {});
       // case-insensitive check — a mixed-case user header (e.g. 'Content-type')
       // must not be duplicated (Avigail finding).
@@ -825,6 +948,39 @@
       return Promise.resolve().then(() => method.call(plugin, options || {}));
     };
 
+    // ── nativeCallback override (docs/plans/folder-watch.md §3א חלק 2) ──────
+    // Capacitor's registerPlugin Proxy (app.js) calls this DIRECTLY (in-memory
+    // JS reference — not via the postToNative/androidBridge JSON bridge) for
+    // any method whose PluginHeaders entry declares rtype:'callback' (see
+    // `cm()` below) — forwarding BOTH args (options, callback). Without this
+    // override, app.js falls through to native-bridge.js's own
+    // `cap.nativeCallback`, which round-trips through `cap.toNative()` →
+    // postToNative → our routeNativeCall (single-arg, one-shot resolve —
+    // wrong shape for a persistent event-listener callback) and additionally
+    // never forwards the real callback function reference at all (only
+    // options are JSON-serialized). This mirrors the nativePromise override
+    // above, just for the 2-arg (options, callback) rtype.
+    const _origNC = cap.nativeCallback;
+    cap.nativeCallback = (pluginName, methodName, options, callback) => {
+      const plugin = plugins[pluginName];
+      if (!plugin) return _origNC ? _origNC(pluginName, methodName, options, callback) : undefined;
+      const method = plugin[methodName];
+      if (typeof method !== 'function') return _origNC ? _origNC(pluginName, methodName, options, callback) : undefined;
+      // spike §0.1 empirical finding (real Obsidian, not self-test): the
+      // registerPlugin Proxy's addListenerFunction forwards `{eventName}` as
+      // the options object (`c.nativeCallback(plugin, 'addListener',
+      // {eventName:'change'}, cb)`), NOT the bare eventName string. Our
+      // plugin methods' existing contract (HttpFilesystem.addListener,
+      // OpfsStore.addListener) takes a plain eventName STRING as their first
+      // arg — matches 33 folder-refresh self-test assertions + the merged
+      // opfs-store self-test, so unwrap here instead of changing that
+      // contract.
+      if (methodName === 'addListener' && options && typeof options.eventName === 'string') {
+        return method.call(plugin, options.eventName, callback);
+      }
+      return method.call(plugin, options || {}, callback);
+    };
+
     cap.isPluginAvailable = (name) => name in plugins;
 
     // convertFileSrc: large binary files (>5MB) fetched via HTTP URL
@@ -847,6 +1003,9 @@
     // rtype 'promise' = single-arg (options obj) → nativePromise
     // rtype 'callback' = two-arg (options, callback) → nativeCallback
     function pm(name) { return { name, rtype: 'promise' }; }
+    // docs/plans/folder-watch.md §3א חלק 1 — addListener needs the real
+    // (options, callback) 2-arg shape, not the single-arg promise shape.
+    function cm(name) { return { name, rtype: 'callback' }; }
 
     cap.PluginHeaders = [
       {
@@ -867,7 +1026,7 @@
           pm('deleteFile'), pm('mkdir'), pm('rmdir'),
           pm('readdir'), pm('stat'), pm('rename'), pm('copy'),
           pm('getUri'), pm('startWatch'), pm('stopWatch'),
-          pm('watchAndStatAll'), pm('addListener'),
+          pm('watchAndStatAll'), cm('addListener'),
           pm('requestPermissions'), pm('requestPerms'), pm('checkPerms'),
           pm('choose'), pm('trash'), pm('setTimes'),
           pm('verifyIcloud'), pm('open'),

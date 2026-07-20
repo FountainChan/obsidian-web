@@ -30,59 +30,10 @@
   'use strict';
 
   // ── low-level OPFS helpers ──────────────────────────────────────────────
-
-  async function rootDir() {
-    return await navigator.storage.getDirectory();
-  }
-
-  async function vaultDir(vaultId, { create = false } = {}) {
-    const root = await rootDir();
-    const vaults = await root.getDirectoryHandle('vaults', { create });
-    return await vaults.getDirectoryHandle(vaultId, { create });
-  }
-
-  // Walk to the parent directory handle of `relPath`, returns {parent, name}.
-  // `create` applies to the vault container AND every intermediate segment —
-  // i.e. create:true auto-creates the whole ancestor chain (mkdir-on-write).
-  async function resolveParent(vaultId, relPath, { create = false } = {}) {
-    const dir = await vaultDir(vaultId, { create });
-    const parts = String(relPath).split('/').filter(Boolean);
-    const name = parts.pop();
-    let cur = dir;
-    for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
-    return { parent: cur, name };
-  }
-
-  // Walk to the directory handle AT `relPath` itself (used by readdir/stat-dir/
-  // rmdir-target/copy-dir-dest). Root ('' or '/') resolves to the vault dir.
-  async function resolveDir(vaultId, relPath, { create = false } = {}) {
-    let cur = await vaultDir(vaultId, { create });
-    const parts = String(relPath || '').split('/').filter(Boolean);
-    for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
-    return cur;
-  }
-
-  // 'file' | 'directory' | null (root '' / '/' is always 'directory')
-  async function statKind(vaultId, relPath) {
-    const normalized = String(relPath || '').replace(/^\/+|\/+$/g, '');
-    if (normalized === '') return 'directory';
-    try {
-      const { parent, name } = await resolveParent(vaultId, normalized, { create: false });
-      try {
-        await parent.getFileHandle(name, { create: false });
-        return 'file';
-      } catch (_) {
-        try {
-          await parent.getDirectoryHandle(name, { create: false });
-          return 'directory';
-        } catch (__) {
-          return null;
-        }
-      }
-    } catch (_) {
-      return null;
-    }
-  }
+  // (root-resolution helpers — resolveParent/resolveDir/statKind — live
+  // inside makeStore now, see "root pluggable" note there: they need access
+  // to the per-store getVaultRoot, which for 'folder' vaults is the picked
+  // FileSystemDirectoryHandle instead of OPFS's navigator.storage.getDirectory().)
 
   // base64 string → ArrayBuffer — same shape as capacitor-shim:78
   function base64ToArrayBuffer(b64) {
@@ -117,13 +68,73 @@
 
   // ── store factory ────────────────────────────────────────────────────────
 
-  function makeStore(vaultId) {
+  // makeStore(vaultId, { getRoot, isFolder }) — `getRoot` is a pluggable
+  // root-directory provider: `async ({ create }) => FileSystemDirectoryHandle`.
+  // Default (no getRoot passed) reproduces the exact OPFS layout used before
+  // this refactor — `navigator.storage.getDirectory()/vaults/<vaultId>` — so
+  // existing (OPFS) callers are unaffected. A `folder` vault (real
+  // directory picked via showDirectoryPicker) passes its own getRoot that
+  // returns the picked handle directly (no `/vaults/<id>` nesting — the
+  // handle itself IS the vault root). `isFolder: true` additionally gates
+  // the external-change watch below (docs/plans/folder-watch.md §2, reused
+  // from folder-refresh) — OPFS-backed `local` vaults can never change
+  // behind our back (the browser is the only writer), so the watch must
+  // stay a no-op there (DoD#4).
+  function makeStore(vaultId, { getRoot, isFolder } = {}) {
+    const getVaultRoot = getRoot || (async ({ create = false } = {}) => {
+      const root = await navigator.storage.getDirectory();
+      const vaults = await root.getDirectoryHandle('vaults', { create });
+      return vaults.getDirectoryHandle(vaultId, { create });
+    });
+
+    // Walk to the parent directory handle of `relPath`, returns {parent, name}.
+    // `create` applies to the vault root AND every intermediate segment —
+    // i.e. create:true auto-creates the whole ancestor chain (mkdir-on-write).
+    async function resolveParent(relPath, { create = false } = {}) {
+      const dir = await getVaultRoot({ create });
+      const parts = String(relPath).split('/').filter(Boolean);
+      const name = parts.pop();
+      let cur = dir;
+      for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
+      return { parent: cur, name };
+    }
+
+    // Walk to the directory handle AT `relPath` itself (used by readdir/stat-dir/
+    // rmdir-target/copy-dir-dest). Root ('' or '/') resolves to the vault root.
+    async function resolveDir(relPath, { create = false } = {}) {
+      let cur = await getVaultRoot({ create });
+      const parts = String(relPath || '').split('/').filter(Boolean);
+      for (const part of parts) cur = await cur.getDirectoryHandle(part, { create });
+      return cur;
+    }
+
+    // 'file' | 'directory' | null (root '' / '/' is always 'directory')
+    async function statKind(relPath) {
+      const normalized = String(relPath || '').replace(/^\/+|\/+$/g, '');
+      if (normalized === '') return 'directory';
+      try {
+        const { parent, name } = await resolveParent(normalized, { create: false });
+        try {
+          await parent.getFileHandle(name, { create: false });
+          return 'file';
+        } catch (_) {
+          try {
+            await parent.getDirectoryHandle(name, { create: false });
+            return 'directory';
+          } catch (__) {
+            return null;
+          }
+        }
+      } catch (_) {
+        return null;
+      }
+    }
 
     // low-level raw (ArrayBuffer) read/write, used internally by copy/rename
     // so they don't pay a redundant base64 round-trip.
     async function readFileRaw(relPath) {
       try {
-        const { parent, name } = await resolveParent(vaultId, relPath, { create: false });
+        const { parent, name } = await resolveParent(relPath, { create: false });
         const fh = await parent.getFileHandle(name, { create: false });
         const file = await fh.getFile();
         return await file.arrayBuffer();
@@ -133,7 +144,7 @@
     }
 
     async function writeFileRaw(relPath, arrayBuffer) {
-      const { parent, name } = await resolveParent(vaultId, relPath, { create: true });
+      const { parent, name } = await resolveParent(relPath, { create: true });
       const fh = await parent.getFileHandle(name, { create: true });
       const w = await fh.createWritable();
       try {
@@ -144,14 +155,14 @@
     }
 
     async function copyPath(fromPath, toPath) {
-      const kind = await statKind(vaultId, fromPath);
+      const kind = await statKind(fromPath);
       if (kind === null) throw capError('ENOENT', 'copy: source not found: ' + fromPath);
       if (kind === 'file') {
         const data = await readFileRaw(fromPath);
         await writeFileRaw(toPath, data);
       } else {
-        await resolveDir(vaultId, toPath, { create: true }); // ensure dest dir exists
-        const srcDir = await resolveDir(vaultId, fromPath, { create: false });
+        await resolveDir(toPath, { create: true }); // ensure dest dir exists
+        const srcDir = await resolveDir(fromPath, { create: false });
         for await (const [name, handle] of srcDir.entries()) {
           const childFrom = fromPath ? fromPath + '/' + name : name;
           const childTo = toPath ? toPath + '/' + name : name;
@@ -166,14 +177,106 @@
     }
 
     async function removePath(relPath) {
-      const kind = await statKind(vaultId, relPath);
+      const kind = await statKind(relPath);
       if (kind === null) throw capError('ENOENT', 'remove: not found: ' + relPath);
       try {
-        const { parent, name } = await resolveParent(vaultId, relPath, { create: false });
+        const { parent, name } = await resolveParent(relPath, { create: false });
         await parent.removeEntry(name, { recursive: kind === 'directory' });
       } catch (e) {
         rethrowAsEnoent(e, 'remove failed: ' + relPath);
       }
+    }
+
+    // ── external-change watch (folder vaults only — docs/plans/folder-watch.md §2,
+    // reused from slice/folder-refresh, which already verified DoD#3/4/5 there) ──
+    // 'local' (OPFS) vaults can never change behind our back — the browser is
+    // the only writer. 'folder' vaults (a real directory, opened via
+    // showDirectoryPicker) CAN change externally (another app, a sync
+    // client, another tab/device on the same directory). This store is the
+    // only place that knows both `isFolder` and the real root handle, so the
+    // watch lives here — gated by `isFolder` (DoD#4).
+    //
+    // The callback fed here is the one captured through `addListener('change',
+    // cb)` below — NOT `startWatch` (a permanent no-op, see below; the bundle
+    // registers its file-watcher listener through addListener — see
+    // docs/plans/folder-watch.md §0/§3א for how the callback now actually
+    // reaches here through the fixed Capacitor dispatch).
+    let changeCb = null;
+    let watchSetupPromise = null;   // idempotent guard — observe()/baseline runs once per addListener('change', ...)
+    let activeObserver = null;      // FileSystemObserver instance, when the primary path is active (for stopWatch)
+    let rescanBaseline = null;      // Map<relPath, {dir, size, mtime}> — rescan() fallback's comparison snapshot
+    let __owSuppressWatch = 0;      // Date.now() deadline — self-write echo suppression (see markSelfWrite)
+
+    // Widen the suppression window around our own writes so the resulting
+    // FileSystemObserver record (or a later rescan() diff) isn't re-announced
+    // as an "external" change. Not a synchronous flag: an empirical spike
+    // (folder-refresh, against real Chromium — FileSystemObserver on OPFS)
+    // showed records land ~300-800ms after the write's createWritable().close()
+    // resolves — a hard "clear right after the op" flag would miss them.
+    // 900ms leaves margin without masking a genuinely-fast external edit.
+    const SELF_WRITE_SUPPRESS_MS = 900;
+    function markSelfWrite() { __owSuppressWatch = Date.now() + SELF_WRITE_SUPPRESS_MS; }
+
+    // Feed one changed path to the callback captured by addListener('change',
+    // cb). vaultId-prefixed — the callback strips basePath (=vaultId) before
+    // matching against the vault; an un-prefixed path gets mangled. `type` is
+    // left for the bundle to decide — only `path` is fed in.
+    function emitChange(relPath) {
+      if (!changeCb) return;
+      if (Date.now() < __owSuppressWatch) return; // our own write — swallow the echo
+      changeCb({ path: vaultId + '/' + relPath });
+    }
+
+    // Walk `dirHandle` (mirrors watchAndStatAll's walk, see below) into a
+    // flat Map<relPath, {dir, size, mtime}> — rescan()'s comparison baseline.
+    async function snapshotTree(dirHandle) {
+      const map = new Map();
+      async function walk(handle, prefix) {
+        for await (const [name, child] of handle.entries()) {
+          const relPath = prefix ? prefix + '/' + name : name;
+          if (child.kind === 'directory') {
+            map.set(relPath, { dir: true, size: 0, mtime: 0 });
+            await walk(child, relPath);
+          } else {
+            const f = await child.getFile();
+            map.set(relPath, { dir: false, size: f.size, mtime: f.lastModified });
+          }
+        }
+      }
+      await walk(dirHandle, '');
+      return map;
+    }
+
+    // primary: FileSystemObserver (feature-detected) → watch the folder root
+    // recursively, feed every record to emitChange. Runs once per
+    // addListener('change', ...) call (idempotent via watchSetupPromise).
+    // Unsupported → prepares rescan()'s baseline instead; the actual
+    // fallback triggers (visibilitychange + button) live in boot.js, both
+    // call store.rescan().
+    function ensureFolderWatch() {
+      if (!isFolder || !changeCb) return Promise.resolve();
+      if (watchSetupPromise) return watchSetupPromise;
+      watchSetupPromise = (async () => {
+        let root;
+        try {
+          root = await getVaultRoot({ create: false });
+        } catch (_) {
+          watchSetupPromise = null; // handle not granted yet — allow a retry on the next addListener
+          return;
+        }
+        if (typeof self !== 'undefined' && 'FileSystemObserver' in self) {
+          activeObserver = new self.FileSystemObserver((records) => {
+            for (const r of records) {
+              const comps = (r && r.relativePathComponents) || [];
+              if (comps.length) emitChange(comps.join('/'));
+            }
+          });
+          await activeObserver.observe(root, { recursive: true });
+        } else {
+          rescanBaseline = await snapshotTree(root); // rescan() diffs against this from now on
+        }
+      })();
+      return watchSetupPromise;
     }
 
     return {
@@ -181,7 +284,7 @@
       async readFile(opts) {
         const encoding = opts.encoding; // 'utf8' | undefined (binary = base64)
         try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
+          const { parent, name } = await resolveParent(opts.path, { create: false });
           const fh = await parent.getFileHandle(name, { create: false });
           const file = await fh.getFile();
           if (encoding) {
@@ -195,8 +298,17 @@
       },
 
       async writeFile(opts) {
+        // self-write echo suppression (reused from folder-refresh): mark
+        // BEFORE the mutation starts, not just after. An empirical spike
+        // there (bun /tmp/spike-suppress.js against real Chromium) showed
+        // FileSystemObserver's "appeared" record lands within a few ms of
+        // getFileHandle({create:true})/createWritable() — often BEFORE
+        // write()/close() even resolve — so marking only in a trailing
+        // `finally` misses it. Marking again after close() extends the
+        // window past completion for any trailing "modified" record too.
+        markSelfWrite();
         const encoding = opts.encoding;
-        const { parent, name } = await resolveParent(vaultId, opts.path, { create: true });
+        const { parent, name } = await resolveParent(opts.path, { create: true });
         const fh = await parent.getFileHandle(name, { create: true });
         const w = await fh.createWritable();
         try {
@@ -207,6 +319,7 @@
           }
         } finally {
           await w.close();
+          markSelfWrite();
         }
         return { uri: '' };
       },
@@ -215,7 +328,8 @@
       // for binary chunk writes. Creates the file (+ missing parents) if it
       // doesn't exist yet.
       async appendFile(opts) {
-        const { parent, name } = await resolveParent(vaultId, opts.path, { create: true });
+        markSelfWrite(); // self-write echo suppression — see writeFile's comment above
+        const { parent, name } = await resolveParent(opts.path, { create: true });
         let existing = new Uint8Array(0);
         let fh;
         try {
@@ -234,13 +348,14 @@
           await w.write(combined.buffer);
         } finally {
           await w.close();
+          markSelfWrite();
         }
         return {};
       },
 
       async deleteFile(opts) {
         try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
+          const { parent, name } = await resolveParent(opts.path, { create: false });
           await parent.removeEntry(name);
         } catch (e) {
           rethrowAsEnoent(e, 'deleteFile: not found: ' + opts.path);
@@ -249,7 +364,8 @@
       },
 
       async mkdir(opts) {
-        const dir = await vaultDir(vaultId, { create: true });
+        markSelfWrite(); // self-write echo suppression — see writeFile's comment above
+        const dir = await getVaultRoot({ create: true });
         const parts = String(opts.path).split('/').filter(Boolean);
         let cur = dir;
         const lastIdx = parts.length - 1;
@@ -257,12 +373,13 @@
           const createFlag = !!opts.recursive || i === lastIdx;
           cur = await cur.getDirectoryHandle(parts[i], { create: createFlag });
         }
+        markSelfWrite();
         return {};
       },
 
       async rmdir(opts) {
         try {
-          const { parent, name } = await resolveParent(vaultId, opts.path, { create: false });
+          const { parent, name } = await resolveParent(opts.path, { create: false });
           await parent.removeEntry(name, { recursive: !!opts.recursive });
         } catch (e) {
           rethrowAsEnoent(e, 'rmdir failed: ' + opts.path);
@@ -272,7 +389,7 @@
 
       async readdir(opts) {
         try {
-          const dir = await resolveDir(vaultId, opts.path, { create: false });
+          const dir = await resolveDir(opts.path, { create: false });
           const files = [];
           for await (const [name, handle] of dir.entries()) {
             if (handle.kind === 'directory') {
@@ -294,7 +411,7 @@
           return { type: 'directory', size: 0, mtime: 0, ctime: 0, uri: '' };
         }
         try {
-          const { parent, name } = await resolveParent(vaultId, normalized, { create: false });
+          const { parent, name } = await resolveParent(normalized, { create: false });
           try {
             const fh = await parent.getFileHandle(name, { create: false });
             const f = await fh.getFile();
@@ -312,10 +429,10 @@
       // destination exists before removing the source so a failed copy
       // never loses data.
       async rename(opts) {
-        const kind = await statKind(vaultId, opts.from);
+        const kind = await statKind(opts.from);
         if (kind === null) throw capError('ENOENT', 'rename: source not found: ' + opts.from);
         await copyPath(opts.from, opts.to);
-        const destKind = await statKind(vaultId, opts.to);
+        const destKind = await statKind(opts.to);
         if (destKind === null) throw capError('EIO', 'rename: copy to destination failed: ' + opts.to);
         await removePath(opts.from);
         return {};
@@ -332,30 +449,77 @@
       },
 
       async getUri(opts) {
-        // Obsidian calls getUri({path:''}) at vault-open to build a base uri —
-        // this must never throw (mirrors HttpFilesystem.getUri, which returns a
-        // string for any path without touching the FS). Real file → blob URL
-        // (for future attachments); root/dir/missing → synthetic uri, no throw.
+        // Obsidian calls getUri({path:''}) at vault-open to build a base uri,
+        // then string-concatenates <vaultId>/<relPath> onto it per-attachment
+        // client-side (spike finding, folder-vault-blob-uri) — this must
+        // never throw (mirrors HttpFilesystem.getUri).
+        //
+        // sw-vault-resources §3א: the base uri is now an **http** URL served
+        // by the Service Worker's `/_owres/` handler (sw.js) straight out of
+        // OPFS/folder-handle — one mechanism for every binary type (img/PDF/
+        // video/audio), replacing the invented `ow-vault:` scheme the browser
+        // blocked, and replacing per-file blob URLs (rejected — see brief §2,
+        // "not one mechanism"). Obsidian's client-side concat produces the
+        // expected double-id path `/_owres/<id>/<id>/<rel>`, normalized by
+        // the SW handler.
         const rel = String(opts.path || '').replace(/^\/+|\/+$/g, '');
-        if (rel !== '') {
-          try {
-            const { parent, name } = await resolveParent(vaultId, rel, { create: false });
-            const fh = await parent.getFileHandle(name, { create: false });
-            return { uri: URL.createObjectURL(await fh.getFile()) };
-          } catch (_) {
-            // directory or missing → fall through to the synthetic uri below
-            // (no throw, matching HttpFilesystem).
-          }
-        }
-        return { uri: 'opfs:/vaults/' + vaultId + (rel ? '/' + rel : '/') };
+        return { uri: location.origin + '/_owres/' + vaultId + (rel ? '/' + rel : '/') };
       },
 
-      // No external file-system changes can happen to OPFS behind our back —
-      // these are no-ops so the plugin surface still "works" when called.
+      // 'local' (OPFS) vaults can never change behind our back — startWatch
+      // stays a permanent no-op there. 'folder' vaults CAN (docs/plans/
+      // folder-watch.md) — but the bundle doesn't actually call startWatch to
+      // register its change listener, it calls addListener('change', cb)
+      // below — that's where the watch is actually wired.
       async startWatch() { return {}; },
-      async stopWatch() { return {}; },
-      async addListener(_eventName, _callback) {
-        return { remove() {} };
+      async stopWatch() {
+        if (activeObserver) { activeObserver.disconnect(); activeObserver = null; }
+        watchSetupPromise = null;
+        rescanBaseline = null;
+        return {};
+      },
+      async addListener(eventName, callback) {
+        if (eventName === 'change') {
+          changeCb = callback;
+          if (isFolder) {
+            try { await ensureFolderWatch(); }
+            catch (e) { console.warn('[ow] folder watch setup failed', e); }
+          }
+        }
+        return {
+          remove() {
+            if (changeCb === callback) changeCb = null;
+          },
+        };
+      },
+
+      // Fallback path (no FileSystemObserver) — walk + diff against the
+      // baseline captured by ensureFolderWatch(), emit one change per
+      // create/modify/delete, then adopt the new snapshot as the baseline.
+      // Folder-only (DoD#4) — no-op on 'local'/'server' backends. Triggered
+      // by boot.js on document visibilitychange + a manual refresh button;
+      // safe to call at any time, including when the primary (observer)
+      // path is active (cheap manual fallback either way).
+      async rescan() {
+        if (!isFolder) return { changed: 0 };
+        let root;
+        try { root = await getVaultRoot({ create: false }); }
+        catch (_) { return { changed: 0 }; }
+        const next = await snapshotTree(root);
+        if (!rescanBaseline) { rescanBaseline = next; return { changed: 0 }; } // first call — just capture
+        let changed = 0;
+        for (const [relPath, meta] of next) {
+          const prev = rescanBaseline.get(relPath);
+          if (!prev || prev.dir !== meta.dir || prev.size !== meta.size || prev.mtime !== meta.mtime) {
+            emitChange(relPath);
+            changed++;
+          }
+        }
+        for (const relPath of rescanBaseline.keys()) {
+          if (!next.has(relPath)) { emitChange(relPath); changed++; }
+        }
+        rescanBaseline = next;
+        return { changed };
       },
 
       async watchAndStatAll() {
@@ -372,7 +536,7 @@
             }
           }
         }
-        const dir = await vaultDir(vaultId, { create: true });
+        const dir = await getVaultRoot({ create: true });
         await walk(dir, '');
         return { children };
       },
