@@ -2,6 +2,21 @@
 
 > ‏רציונל ‏ארכיטקטוני ‏פר-slice (‏מרדכי). ‏ליד הקוד, ‏לא ‏בריפו ‏השיטה.
 
+## 2026-07-20 — server-sync-pull: לקוח pull hash-based (v1, OPFS-local)
+
+### רציונל
+צד-הלקוח של מנוע-הסנכרון (ראה entry הארכיטקטורה למטה). v1 = pull חד-כיווני בטוח מול sync-server.
+
+### החלטות-מפתח (מ-4 סבבי אביגיל)
+- **hash מחליף mtime-mapping**: `lastSyncedHash` פר-path (IndexedDB) — אמין, מפשט את הלקוח.
+- **hashing על בייטים-גולמיים**: `readFile` מחזיר base64 → חייבים לקרוא ArrayBuffer ישירות מ-OPFS root ו-sha-256
+  עליו (לא על ה-base64), אחרת אף hash לא תואם לשרת → סנכרון שבור-בשקט.
+- **base64 מחולק-chunks לכתיבה**: `btoa` קורס >64KB → שחיתות attachments; DoD כולל binary>64KB byte-exact.
+- **v1 = OPFS-local בלבד**: root של OpfsStore pluggable → שכפול הדיפולט נכון רק ל-`__owVaultType==='local'`;
+  folder/server → אין sync (v2).
+- טבלת-החלטה hash-based (6 שורות): `L==R`→skip; `L==⊥`→download; `L!=R,S==⊥`→conflictSkip (מגן);
+  `L==S,R!=S`→download; `L!=S,R==S`→skip; שניהם השתנו→conflictSkip.
+
 ## 2026-07-20 — מנוע-סנכרון OPFS↔שרת: ארכיטקטורה + פרוטוקול (sync-server + server-sync-pull)
 
 ### רציונל
