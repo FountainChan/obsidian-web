@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('assert/strict');
 const crypto = require('crypto');
+const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
@@ -139,6 +140,81 @@ test('boot fail-closed: VAULT_PATH pointing at a nonexistent path -> process exi
 
   assert.notEqual(exitCode, 0);
   assert.match(stderr, /VAULT_PATH does not exist/);
+});
+
+test('CORS (brief sync-server-cors §5): OPTIONS preflight on a real mounted route succeeds without a token', async (t) => {
+  const root = await makeFixtureVault();
+  const { baseUrl, close } = await startApp(root);
+  t.after(async () => { await close(); await fsp.rm(root, { recursive: true, force: true }); });
+
+  const res = await fetch(`${baseUrl}/sync/v1/manifest`, {
+    method: 'OPTIONS',
+    headers: {
+      origin: 'https://obsidian-online.pages.dev',
+      'access-control-request-method': 'GET',
+      'access-control-request-headers': 'authorization',
+    },
+  });
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+  assert.equal(res.headers.get('access-control-allow-headers'), 'Authorization');
+  assert.equal(res.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
+});
+
+test('CORS (brief sync-server-cors §5): cross-origin GET with a valid token succeeds and carries CORS headers', async (t) => {
+  const root = await makeFixtureVault();
+  const { baseUrl, close } = await startApp(root);
+  t.after(async () => { await close(); await fsp.rm(root, { recursive: true, force: true }); });
+
+  const res = await fetch(`${baseUrl}/sync/v1/manifest`, {
+    headers: {
+      origin: 'https://obsidian-online.pages.dev',
+      authorization: `Bearer ${TOKEN}`,
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+});
+
+test('CORS (brief sync-server-cors §5): CORS does not bypass auth — cross-origin GET without/with-wrong token is still 401', async (t) => {
+  const root = await makeFixtureVault();
+  const { baseUrl, close } = await startApp(root);
+  t.after(async () => { await close(); await fsp.rm(root, { recursive: true, force: true }); });
+
+  const noToken = await fetch(`${baseUrl}/sync/v1/manifest`, {
+    headers: { origin: 'https://obsidian-online.pages.dev' },
+  });
+  assert.equal(noToken.status, 401);
+
+  const wrongToken = await fetch(`${baseUrl}/sync/v1/manifest`, {
+    headers: { origin: 'https://obsidian-online.pages.dev', authorization: 'Bearer wrong' },
+  });
+  assert.equal(wrongToken.status, 401);
+});
+
+test('CORS (brief sync-server-cors §5, DDoS): OPTIONS preflight does zero filesystem work (never reaches the vault)', async (t) => {
+  const root = await makeFixtureVault();
+  const { baseUrl, close } = await startApp(root);
+  t.after(async () => { await close(); await fsp.rm(root, { recursive: true, force: true }); });
+
+  // Same technique as auth.test.js's "zero filesystem work" check — instrument
+  // the real fs module; the preflight handler (cors.js) must never touch it,
+  // since it's mounted before syncRouter/auth/manifestService entirely.
+  const spies = ['stat', 'readdir', 'readFile', 'createReadStream'];
+  const originals = spies.map((name) => fs[name]);
+  const calls = { count: 0 };
+  spies.forEach((name, i) => {
+    fs[name] = (...args) => {
+      calls.count += 1;
+      return originals[i](...args);
+    };
+  });
+  t.after(() => spies.forEach((name, i) => { fs[name] = originals[i]; }));
+
+  await fetch(`${baseUrl}/sync/v1/manifest`, { method: 'OPTIONS', headers: { origin: 'https://x.example' } });
+  await fetch(`${baseUrl}/sync/v1/blob/${'a'.repeat(64)}`, { method: 'OPTIONS', headers: { origin: 'https://x.example' } });
+
+  assert.equal(calls.count, 0);
 });
 
 test('boot fail-closed: VAULT_PATH pointing at a file (not a directory) -> process exits before listening (calev-heavy finding 1)', async (t) => {
