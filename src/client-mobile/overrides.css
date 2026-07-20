@@ -47,6 +47,16 @@
   animation: ow-spin 0.6s linear infinite;
 }
 
+/*
+ * ── "Sync now" button spin (docs-repo brief server-sync-pull.md §2/§3ד) ──
+ * `.ow-sync-now-btn` (boot.js, installSyncNowTrigger) — same reuse of the
+ * `ow-spin` keyframes as the folder-refresh button above, same rationale
+ * (document-global @keyframes name, don't redefine it here).
+ */
+.ow-sync-now-btn.is-spinning svg {
+  animation: ow-spin 0.6s linear infinite;
+}
+
 @media (min-width: 720px) {
   /* מסך vault-chooser ("Obsidian" / רשימת vaults) — צמצום מ-800 ל-480 כדי
      שהשורות (Setup Sync / Create new vault / vaults קיימים) לא יפרשו מקצה

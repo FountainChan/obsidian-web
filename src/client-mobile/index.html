@@ -67,6 +67,19 @@
   <script src="/client-mobile/storage/opfs-store.js?v=1"></script>
   <script src="/client-mobile/storage/folder-handle-store.js?v=1"></script>
 
+  <!-- 0b. Pull-sync engine (docs-repo brief server-sync-pull.md §2) — v1 =
+       OPFS-local vaults only. Must load before boot.js so
+       window.__owSync* are ready when boot.js mounts the "Sync now" button
+       (guarded on window.__owVaultType==='local' + a stored config). Order
+       among these 5 doesn't matter at load time (each only touches the
+       others' window.__owSync* globals inside async functions, never at
+       top-level) — grouped in brief §2's file order for readability. -->
+  <script src="/client-mobile/sync/decide-pull.js?v=1"></script>
+  <script src="/client-mobile/sync/hash-store.js?v=1"></script>
+  <script src="/client-mobile/sync/local-manifest.js?v=1"></script>
+  <script src="/client-mobile/sync/remote-client.js?v=1"></script>
+  <script src="/client-mobile/sync/run-pull.js?v=1"></script>
+
   <!-- 1. Capacitor shim — חייב לפני native-bridge.js כדי שandroidBridge יהיה
        מוגדר כשהbridge מאתחל את הplatform. -->
   <script src="/client-mobile/shims/capacitor-shim.js?v=1"></script>
