@@ -2,6 +2,36 @@
 
 > ‏רציונל ‏ארכיטקטוני ‏פר-slice (‏מרדכי). ‏ליד הקוד, ‏לא ‏בריפו ‏השיטה.
 
+## 2026-07-20 — מנוע-סנכרון OPFS↔שרת: ארכיטקטורה + פרוטוקול (sync-server + server-sync-pull)
+
+### רציונל
+המשתמשת רצתה סנכרון של כספת-OPFS-בדפדפן מול תיקיית-vault **בשרת** (לא במכונת-המשתמש — ערוץ נפרד מ-folder-watch).
+מחקר פלאגיני-סנכרון: **אין** פתרון בוגר-חינמי-מובייל טוב (GDrive עלוב; Remotely-Save נעל את מנוע-הסנכרון ב-`pro/`
+PolyForm; LiveSync בוגר אבל צמוד-CouchDB). המנוע היחיד שרץ בדפדפן טהור = LiveSync (PouchDB). החלטה: **לבנות
+מנוע משלנו**, גזור מ-**remotely-save Apache-2.0** (fork ששימר את המנוע לפני ה-split; רי-לייסנס לא רטרואקטיבי).
+
+### החלטות
+- **חבילה נפרדת רזה** (לא חלק מ-runtime-server המלא): האפליקציה static/serverless, השרת רץ אצל המשתמש מצביע
+  על תיקייתו; לא צריך את baggage ה-Obsidian-runtime (bootstrap/electron/proxy). תקדים: extract-runtime-server.
+- **פרוטוקול `/sync/v1` מאופטם — content-hash, לא mtime**: ה-hash (sha-256) **מחסל את ה-mtime-mapping gotcha**
+  (שרת לא משמר mtime → hash דטרמיניסטי מהתוכן). blobs content-addressed (immutable, cache/dedup). cursor+change-feed
+  ל-incremental (v2). ההחלטה = max/hash-of-4-states (remotely-save), מותאם ל-hash.
+- **auth Bearer עמיד-DDoS** (דרישת-המשתמשת): דחייה O(1) לפני כל FS, `timingSafeEqual` (constant-time),
+  fail-closed ב-boot (SYNC_TOKEN לא-מוגדר → לא עולה). הצפת-בקשות-רעות = ~0 עבודה לשרת.
+- **v1 = pull חד-כיווני, OPFS-local בלבד, בטוח**: מוריד חדש/משתנה, מגן על עריכות-מקומיות (conflictSkip,
+  לא דורס). push/מחיקות/דו-כיווני/realtime/הצפנה = v2.
+
+### שינויי-כיוון (אביגיל)
+- הפרוטוקול הנאיבי (mtime + `/api/fs` קיים) → מאופטם (hash + `/sync/v1`): ה-hash **מפשט** את הלקוח
+  (mtime-mapping store → lastSyncedHash אמין).
+- base64-write חייב chunking (btoa קורס >64KB → שחיתות attachments); hash חייב בייטים-גולמיים (readFile מחזיר base64).
+
+### רעיונות שנדחו
+- **Remotely-Save כמנוע**: המנוע ב-`pro/` PolyForm (אסור לגזור); רק ה-adapters/manifest החינמיים Apache-2.0.
+- **LiveSync כבסיס למסלול-הזה**: צמוד CouchDB, לא file-server; נשאר אופציה מקבילה (מותקן-מושבת).
+- **Obsidian Sync כמקור-לימוד**: סגור-מקור + מודל-DB-ריכוזי (לא file-server).
+- **Google Drive backend**: כאב-OAuth בלי תמורה; WebDAV/file-server עדיף.
+
 ## 2026-07-20 — folder-refresh-toolbar: כפתור-רענון בסרגל ה-file-explorer + פידבק
 
 ### רציונל
