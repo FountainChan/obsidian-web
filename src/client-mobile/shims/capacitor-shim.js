@@ -38,7 +38,8 @@
  *   App.requestUrl — real fetch() impl (slice livesync-requesturl).
  *                      Supports GET/POST/PUT, headers, body (string + binary),
  *                      always returns body as base64 (Obsidian calls atob unconditionally).
- *                      See PLAN.md → "Updated approach (2026-05-11): direct fetch + CORS".
+ *                      Rationale: "Updated approach (2026-05-11): direct fetch + CORS" —
+ *                      why the earlier server-proxy design was rejected in favor of this.
  *
  * Vault path: read from localStorage / URL params (same mechanism as desktop).
  * All FS calls get ?vault=<id> query param so the server routes to the right vault.

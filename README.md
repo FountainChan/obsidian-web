@@ -246,7 +246,7 @@ The Node.js server (`src/runtime-server/server/`) can be deployed to any Linux b
 - Obsidian's extracted files are treated as third-party artifacts. Do not edit files under `vendor/obsidian-mobile/`; update wrappers/shims instead.
 - The default vault is `user-data/demo-vault/`.
 - Do not bind the server to a public IP without a tunnel or auth layer in front.
-- Current architecture and roadmap are in `PLAN.md`.
+- See `docs/architecture.md` for the current architecture and design principles.
 - `vendor/obsidian-desktop/` and `scripts/update-obsidian-desktop.js` (the legacy desktop renderer + its
   downloader) are **vestigial** — the server no longer serves any route from them (removed
   in the `collapse-desktop` slice). They are left in place rather than deleted; if you don't
