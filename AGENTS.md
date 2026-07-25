@@ -1,39 +1,50 @@
 # AGENTS.md — obsidian-web
 
-> נקודת-כניסה לסוכני-קוד (Claude Code / Cursor / Copilot / …). ניטרלי-כלי.
-> `CLAUDE.md` מפנה לכאן עם `@AGENTS.md`. בני-אדם: התחילו מ-`README.md`.
+> Conventions for anyone (human or coding agent) changing this repo.
+> Tool-neutral; `CLAUDE.md` just imports this file.
+> **Start with `README.md`** for what the project is and how to run it.
 
-## מה זה הפרויקט
-מריצים את ה-renderer של Obsidian בדפדפן רגיל (בלי Electron), ע"י shims שמזייפים
-Electron/Capacitor. **serverless (OPFS) הוא הראשי**; server (`/api/fs`) ו-desktop
-הם אופציות משניות חיות. פרטים: `agent-context/architecture.md`.
+## What this project is
 
-## קונבנציות — חובה
-- **bun, לא node**: אין node אמיתי בסביבה בכוונה (מסומלנק ל-bun), כדי לאלץ סוכנים
-  להשתמש ב-bun. הרץ שרת/בדיקות עם bun. אל תחפש node חלופי. (חריג: פעולות-ops של
-  מרדכי כמו wrangler-deploy משתמשות ב-node אמיתי — לא רלוונטי לביצוע slice.)
-- **bare repo + worktrees**: השורש מכיל `.bare` + worktrees `main`/`dev` +
-  `worktrees/<slice>`. ה-base לכל slice הוא **dev**. merge → dev, ואז dev → main.
-- **merge = מרדכי בלבד, באישור המשתמשת המפורש.** אף סוכן אחר לא ממזג.
-- **vendor/ gitignored** — מיוצר ע"י `scripts/update-obsidian-*.js`; לא ב-repo.
-- **הבַּאנדל minified** — עגן patches/עריכות לפי **pattern/שם-symbol**, לא לפי
-  מספר-שורה (נודד). ראה `scripts/patch-obsidian-mobile.js` (תיעוד-בגוף).
-- **אין PII בריפו-הקוד** — שמות-כספת אישיים, נתיבי-מכונה, לוגי-ביצוע → **לא כאן**.
+Runs Obsidian's own renderer in a regular browser — no Electron — by shimming the
+Electron/Capacitor/Node APIs it expects. There is **one runtime core**
+(`src/client-mobile/`) with a **swappable backend**:
 
-## איפה כל דבר
-| מה | איפה |
-|----|------|
-| החלטות + רציונל ("למה") | `agent-context/decisions/obsidian-web.md` |
-| ארכיטקטורה | `agent-context/architecture.md` |
-| docs אנושיים (dev-setup, guides) | `docs/` |
-| **briefs (תוכניות-ביצוע) + reports** | ריפו חיצוני: `github.com/MusiCode1/docs-repo` → `obsidian-web/` |
-| dispatch לסוכן-ביצוע | ה-brief מפנה ל-boilerplate פר-פרויקט (ב-docs-repo) |
+| Layer | Status | Storage |
+|-------|--------|---------|
+| serverless | primary | OPFS in the browser + folder vaults (File System Access API) |
+| server | supported | real files via `/api/fs` |
 
-## מתודולוגיה (brief-driven-slices)
-מרדכי מתכנן+ממזג · אביגיל מאמתת brief (gate: READY) · אליעזר מבצע · כלב/כלב-heavy
-מאמתים runtime (gate: GO). כל שינוי עובר brief → אביגיל → ביצוע → כלב → merge.
+See `docs/architecture.md` for the full picture.
 
-## לפני שנוגעים
-1. קרא את entry ה-ארכיטקטורה האחרון ב-`agent-context/decisions/`.
-2. שינוי code → brief (docs-repo) → אביגיל. אל תבצע לפני READY.
-3. אל תמזג, אל תפרוס לחי (ops של מרדכי).
+## Conventions — required
+
+- **bun, not node.** Run the servers and tests with `bun`. (`src/runtime-server/`
+  still has node-flavoured scripts; that inconsistency is known.)
+- **`vendor/` is gitignored.** It holds Obsidian's own bundle, generated locally by
+  `scripts/update-obsidian-*.js`. It is never committed and never redistributed —
+  each user downloads Obsidian themselves.
+- **The bundle is minified.** Anchor any patch or edit to a **pattern / symbol
+  shape**, never to a line number — line numbers move on every Obsidian release.
+  See `scripts/patch-obsidian-mobile.js`, which documents this in-body.
+- **No personal data in this repo.** Personal vault names, machine paths, run logs,
+  and internal planning notes do not belong here.
+
+## Layout
+
+| What | Where |
+|------|-------|
+| Architecture and rationale | `docs/architecture.md` |
+| Reverse-engineering notes, solved issues | `docs/investigations.md` |
+| Writing a system plugin | `docs/system-plugin-dev-guide.md` |
+| Runtime (the browser side) | `src/client-mobile/` |
+| Node backend (optional) | `src/runtime-server/` |
+| Pull-sync server | `src/sync-server/` |
+| Cloudflare deployment | `src/deployments/cloudflare/` |
+
+## Before you touch the bundle
+
+`vendor/obsidian-mobile/app.js` is Obsidian's proprietary code. We apply a small,
+documented set of patches to the **local** copy. Keep that set as small as
+possible, and prefer a shim over a patch whenever the same result is reachable
+through a platform API.

@@ -49,7 +49,7 @@ LiveSync (Obsidian plugin) מעולם לא יודע ש-Filesystem (Capacitor plu
 - `/mobile` — mobile bundle (`obsidian-mobile/app.js`) + Capacitor shim (`client-mobile/`). זה ה-runtime המועדף; ראה הסעיפים [PluginHeaders mechanism](#pluginheaders), [Capacitor plugin inventory](#capacitor-plugin-inventory), ו-[`__owPlatform` runtime API](#owplatform-api).
 
 **Build-time patches על ה-mobile bundle** (`scripts/patch-obsidian-mobile.js`):
-שלושה regex patches על `obsidian-mobile/app.js` חושפים את אובייקט ה-Platform כ-`window.__owPlatform` וממזגים `window.__owPlatformOverrides` לתוך ה-IIFE. כך `client-mobile/boot.js` שולט ב-flag `isMobile` (UI layout) **לפני** ש-`app.js` רץ. ראה walkthrough.md 19:30 לפרטים מלאים.
+שלושה regex patches על `obsidian-mobile/app.js` חושפים את אובייקט ה-Platform כ-`window.__owPlatform` וממזגים `window.__owPlatformOverrides` לתוך ה-IIFE. כך `client-mobile/boot.js` שולט ב-flag `isMobile` (UI layout) **לפני** ש-`app.js` רץ. 
 
 **System plugin overlay** (`server/system-plugins.js`):
 תוספי Obsidian מהריפו (`<repo>/plugins/`) מוזרקים כ-virtual entries לכל vault. ה-vault עצמו אינו מתלכלך — `community-plugins.json` ממוזג ב-read ומופשט ב-write. הראשון: `obsidian-web-layout` (ribbon + commands להחלפת layout). מקור עומק: [Virtual plugin overlay — deep dive](#virtual-overlay-deep-dive).
@@ -58,10 +58,8 @@ LiveSync (Obsidian plugin) מעולם לא יודע ש-Filesystem (Capacitor plu
 שני runtimes צורכים את `/api/bootstrap` ל-cold boot מהיר. ה-mobile shim בודק את `window.__owBootstrapCache` לפני HTTP על כל `readFile`/`stat`/`readdir` (88% hit rate). שלושה env vars לדפלוייר: `BOOTSTRAP_DISABLED`, `BOOTSTRAP_MAX_FILE_KB`, `BOOTSTRAP_MAX_TOTAL_MB`. מגבלות ידועות: [Workers לא רואים את ה-cache](#mobile-bootstrap-cache-workers), [watch-event firehose ב-LiveSync](#mobile-bootstrap-cache-firehose).
 
 **מקורות מידע משלימים:**
-- `docs/walkthrough.md` — יומן פיתוח כרונולוגי (19:30 build-time patches, 20:05 system plugin overlay, 17:00 בניית ה-Capacitor shim).
 - `PLAN.md` — סטטוס, roadmap, ו-LiveSync integration plan.
 - `docs/system-plugin-dev-guide.md` — איך להוסיף system plugin חדש.
-- `docs/dev-setup.md` — workflow של דפדפן gui-host ל-QA.
 
 ---
 
@@ -166,7 +164,7 @@ GET /api/fs/read?path=.obsidian/plugins/obsidian-web-layout/main.js   → 200 (f
 
 ### כלי ניפוי שגיאות — globals זמינים ב-DevTools
 
-שלושה globals מוזרקים ב-boot שימושיים לחקירה. **כסוכן: הרץ אותם דרך `playwright-cli evaluate` או בקש מהמשתמש להריץ ב-DevTools.**
+שלושה globals מוזרקים ב-boot שימושיים לחקירה. הרץ אותם ב-DevTools console.
 
 ---
 
@@ -293,19 +291,15 @@ const wrap = (obj, name, label) => {
 ```
 שימוש: `wrap(view, "acceptRename", "acceptRename")`.
 
-**גישה ל-eval מ-playwright-cli:**
-```bash
-ssh gui-host "... && playwright-cli eval --raw 'async () => { ... return JSON.stringify(...); }'"
-```
-- **חייב** `--raw` כדי לקבל את הreturn value נקי.
-- **חייב** `JSON.stringify` כי playwright-cli serializer לפעמים נחנק על objects מורכבים.
-- מתודות שמחזירות Promise - חייב async או .then()/.catch().
-- **לפעמים eval מעוכב** אם אין reload - אובייקטים נשארים בזיכרון; בכל מקרה חוזרים אחרי כל שינוי בקוד.
+**הערות על הרצת eval מכלי אוטומציה** (Playwright/CDP וכד'):
+- החזר `JSON.stringify(...)` — serializers רבים נחנקים על objects מורכבים.
+- מתודות שמחזירות Promise — חייב async או `.then()`/`.catch()`.
+- ללא reload אובייקטים נשארים בזיכרון; בכל מקרה הם חוזרים אחרי כל שינוי בקוד.
 
 **הפעלת השרת (עם auto-reload):**
 
 ```bash
-cd ~/projects/obsidian-web/server
+cd src/runtime-server/server
 nohup npm run dev > /tmp/obsidian-web-server.log 2>&1 &
 ```
 
@@ -321,12 +315,9 @@ kill $(lsof -ti :3000) 2>/dev/null
 - `tail -f /tmp/obsidian-web-server.log`
 - ה-middleware של request logging מסנן רק `/api`, `/i18n`, `/lib`. אם צריך יותר - להרחיב.
 
-**גישה ל-console messages ב-browser:**
-```bash
-ssh gui-host "ls -t ~/Documents/playwright-cli/results/console-* | head -1 | xargs cat"
-```
-- זה מצטבר עם הזמן. בואו לעיתים נרענן עם `goto` כדי לקבל console חדש.
-- שימושי לסנן ב-`grep TRACE` כדי לקבל רק את הtraces שלנו.
+**גישה ל-console messages ב-browser:** ה-DevTools console, או קובץ ה-console שכלי
+האוטומציה שלך כותב. הלוג מצטבר — רענן עם `goto` כדי לקבל console נקי, וסנן
+ב-`grep TRACE` כדי לראות רק traces שלנו.
 
 ---
 
@@ -1108,7 +1099,7 @@ Web Workers הם **קונטקסטים נפרדים לחלוטין** — להם �
 2. ה-main thread שולח את ה-buffer ל-worker דרך `postMessage` כ-`{ metadataCache: <ArrayBuffer> }`.
 3. ה-worker מקבל buffer, עושה `TextDecoder().decode()`, מפרסר את ה-Markdown, ומחזיר את האינדקס דרך `postMessage` חזרה.
 
-ראיתי את זה כשבדקתי את `vendor/obsidian-mobile/worker.js` — הקוד שלו מקבל `e.data.metadataCache` כ-buffer ובכלל לא יודע מאיפה הקובץ הגיע. זו הסיבה שבמדידה ראיתי **88% cache hit rate** (322 hits מתוך 366 קריאות) ב-cold boot על vault `009428c4` (394 קבצים) — ה-main thread שקורא את הקבצים עבור ה-worker עובר דרך ה-shim שלנו ופוגע ב-cache.
+ראיתי את זה כשבדקתי את `vendor/obsidian-mobile/worker.js` — הקוד שלו מקבל `e.data.metadataCache` כ-buffer ובכלל לא יודע מאיפה הקובץ הגיע. זו הסיבה שבמדידה ראיתי **88% cache hit rate** (322 hits מתוך 366 קריאות) ב-cold boot על כספת בדיקה (394 קבצים) — ה-main thread שקורא את הקבצים עבור ה-worker עובר דרך ה-shim שלנו ופוגע ב-cache.
 
 #### מתי זה כן ייהפך לבעיה
 
@@ -1116,7 +1107,7 @@ Web Workers הם **קונטקסטים נפרדים לחלוטין** — להם �
 
 1. **plugin של מישהו** מחליט ליצור worker משלו ולעשות fetch מתוכו. נדיר אבל אפשרי — למשל plugin של search שרוצה לפרסר 1000 קבצים במקביל בלי לתפוס את ה-main thread.
 2. **אובסידיאן עצמה משנה ארכיטקטורה** ומעבירה את קריאת הקבצים ל-worker. אם זה יקרה, כל ה-cache שלנו ב-mobile יהפוך לחסר ערך עד שנגיב.
-3. **Service Workers** של LiveSync (שמוזכר ב-`docs/plans/livesync-implementation.md`) — אם LiveSync ירצה offline cache בעתיד, היא תרצה גישה לאותם נתונים.
+3. **Service Workers** של LiveSync — אם LiveSync ירצה offline cache בעתיד, היא תרצה גישה לאותם נתונים.
 
 #### פתרונות אפשריים אם זה ייהפך לבעיה
 
@@ -1166,7 +1157,7 @@ delete cache.dirs[parent];
 
 שני נימוקים:
 
-1. **LiveSync עדיין לא הותקנה בפרויקט.** הפלאן שלה (`docs/plans/livesync-implementation.md`) הוא עתידי. עד שהיא תרוץ, אין firehose אמיתי. כשהיא תיכנס, נצבע נתונים אמיתיים על כמה תיקיות מתבטלות וכמה שניות זה מוסיף.
+1. **LiveSync עדיין לא הותקנה בפרויקט.** האינטגרציה שלה עדיין עתידית. עד שהיא תרוץ, אין firehose אמיתי. כשהיא תיכנס, נצבע נתונים אמיתיים על כמה תיקיות מתבטלות וכמה שניות זה מוסיף.
 
 2. **הפתרון לא טריוויאלי וה-design choices לא ברורים מראש.** שלוש אפשרויות:
 
@@ -1178,7 +1169,7 @@ delete cache.dirs[parent];
 
    הבחירה תלויה במה שיתגלה כצוואר-בקבוק בפועל אחרי שה-LiveSync יתחיל לרוץ. עדיף למדוד לפני שמחליטים מאשר לבחור עכשיו ולשלם תחזוקה על פתרון שאולי לא צריך.
 
-Pitfall #5 בפלאן `docs/plans/mobile-bootstrap-cache.md` מסמן את זה במפורש כ-"out of scope ל-v1; document".
+Pitfall #5 בתכנון ה-bootstrap cache מסמן את זה במפורש כ-"out of scope ל-v1; document".
 
 ---
 

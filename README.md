@@ -2,7 +2,7 @@
 
 Run Obsidian in a standard browser — no Electron, no native app needed.
 
-**[Live Demo →](https://obsidian-web.tzlev.ovh)**
+**[Live Demo →](https://obsidian-online.pages.dev)**
 
 obsidian-web loads Obsidian's original renderer (`app.js`) completely unmodified and replaces every Node.js / Electron dependency with lightweight HTTP shims. The result is real Obsidian running in any modern browser.
 
@@ -28,7 +28,7 @@ The browser version can load faster than the desktop app. Instead of Obsidian re
 | Storage | Real filesystem | Durable Object (in-memory) |
 | Persistence | Full | R2 (optional) or reset every N hours |
 | Use case | Personal use, self-hosted | Public demo, zero-maintenance |
-| URL | `http://localhost:3000` | [obsidian-web.tzlev.ovh](https://obsidian-web.tzlev.ovh) |
+| URL | `http://localhost:3000` | [obsidian-online.pages.dev](https://obsidian-online.pages.dev) |
 
 ## Repo layout
 
@@ -225,6 +225,21 @@ This is an **educational proof-of-concept** exploring how Electron-based apps ca
 This repository does **not** include Obsidian's source code. The `vendor/obsidian-desktop/` and `vendor/obsidian-mobile/` directories are gitignored — users must download Obsidian's renderer themselves using the provided setup scripts. Obsidian's code remains the property of Dynalist Inc. under their [Terms of Service](https://obsidian.md/terms).
 
 If the Obsidian team has any concerns about this project, please [open an issue](https://github.com/MusiCode1/obsidian-web/issues) and we will address them promptly.
+
+## License
+
+[GNU General Public License v3.0](LICENSE) (`GPL-3.0-only`).
+
+**This applies to obsidian-web's own code only** — everything under `src/` and `scripts/`.
+You are free to use, study, modify and redistribute it; if you distribute a modified
+version, it must also be GPL-3.0 and its source must be available.
+
+It does **not** apply to Obsidian itself. The `vendor/` directories hold Obsidian's own
+proprietary bundle, are gitignored, are never redistributed by this project, and remain
+governed solely by [Dynalist Inc.'s Terms of Service](https://obsidian.md/terms). Nothing
+here grants any rights over Obsidian's code. obsidian-web does not modify Obsidian's
+source in this repository — the setup scripts download it and apply a small set of
+documented patches to **your local copy** at install time.
 
 ## Credits
 

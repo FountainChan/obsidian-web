@@ -876,6 +876,104 @@ const MOBILE_SCRIPTS = [
     });
   }
 
+  // ── pull-sync "Sync now" trigger (the pull-sync brief
+  // §2/§3ד, pattern reused from installFolderRefreshWatch's manual-refresh
+  // button above) ─────────────────────────────────────────────────────────
+  // v1 = OPFS-local vaults only (brief §3א round-3 finding — the sync
+  // engine's default OPFS root resolution only matches 'local' vaults'
+  // layout). This VAULT_TYPE check is the ONE guard point run-pull.js
+  // itself relies on (it never re-checks __owVaultType). A vault with no
+  // stored `ow-sync:<id>` config (brief §3ה — v1 has no settings-UI, set
+  // via localStorage directly) never gets a button, never touches the
+  // network, never hashes anything (brief §5 DoD#6).
+  function installSyncNowTrigger() {
+    if (VAULT_TYPE !== 'local') return;
+    if (!window.__owSyncRunPull) return;
+    var cfg = window.__owSyncRunPull.getSyncConfig(VAULT_ID);
+    if (!cfg) return; // guard — no config → no button, no network (DoD#6)
+
+    // lucide "cloud-download" path data (stable across lucide releases —
+    // unlike the refresh icon, this one wasn't grepped from this bundle's
+    // app.js because it isn't a pre-existing bundle icon; inline SVG doesn't
+    // depend on the bundle's icon table either way, brief §3ו / folder-
+    // refresh-toolbar §0.1ג precedent: window.setIcon isn't exposed here).
+    var OW_SYNC_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" ' +
+      'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round" class="svg-icon lucide-cloud-download">' +
+      '<path d="M12 13v8"></path><path d="m8 17 4 4 4-4"></path>' +
+      '<path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"></path></svg>';
+
+    function setSpin(on) {
+      var btns = document.querySelectorAll('.ow-sync-now-btn');
+      for (var i = 0; i < btns.length; i++) {
+        if (on) btns[i].classList.add('is-spinning');
+        else btns[i].classList.remove('is-spinning');
+      }
+    }
+
+    var running = false;
+    function doSync() {
+      if (running) return; // UI-level debounce; window.__owSyncRunPull's own
+                            // syncStatus mutex (brief §3ד) is the real guard —
+                            // this just avoids spamming console/spin state.
+      running = true;
+      setSpin(true);
+      window.__owSyncRunPull.run(VAULT_ID, cfg)
+        .then(function (r) {
+          if (r && r.skipped) {
+            console.log('[ow-sync] busy — sync already running');
+            return;
+          }
+          console.log('[ow-sync] ' + r.downloaded + ' downloaded, ' + r.skipped + ' skipped, ' + r.conflicts + ' conflicts');
+          if (typeof window.Notice === 'function') {
+            new window.Notice(r.downloaded + ' הורדו, ' + r.skipped + ' דילוגים, ' + r.conflicts + ' קונפליקטים');
+          }
+        })
+        .catch(function (e) {
+          console.warn('[ow-sync] sync failed', e);
+          if (typeof window.Notice === 'function') {
+            // 401 → explicit message, no retry-loop (brief §3ה).
+            new window.Notice((e && e.code === 'EAUTH') ? 'סנכרון: אימות נכשל' : 'סנכרון נכשל');
+          }
+        })
+        .then(function () { running = false; setSpin(false); });
+    }
+
+    function mountSyncButton() {
+      var bars = document.querySelectorAll(
+        '.workspace-leaf-content[data-type="file-explorer"] .nav-buttons-container');
+      for (var i = 0; i < bars.length; i++) {
+        var bar = bars[i];
+        if (bar.querySelector('.ow-sync-now-btn')) continue;   // dedupe
+        var btn = document.createElement('div');   // nav-action-button is a div in this bundle
+        btn.className = 'clickable-icon nav-action-button ow-sync-now-btn';
+        btn.setAttribute('aria-label', 'Sync now — משוך שינויים מהשרת');
+        btn.innerHTML = OW_SYNC_SVG;
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          doSync();
+        });
+        bar.appendChild(btn);
+      }
+    }
+
+    // same App.onload race guard as installFolderRefreshWatch above
+    // (app.vault can exist before app.workspace).
+    owWhenAppReady(function (app) {
+      function whenWorkspaceReady(tries) {
+        if (app.workspace) {
+          mountSyncButton();
+          app.workspace.on('layout-change', mountSyncButton);
+          return;
+        }
+        if ((tries || 0) >= 160) return;
+        setTimeout(function () { whenWorkspaceReady((tries || 0) + 1); }, 50);
+      }
+      whenWorkspaceReady(0);
+    });
+  }
+
   setStatus('Verifying vault...');
 
   // אמת שה-vault קיים: local → OPFS getDirectoryHandle (idempotent, אין
@@ -1024,6 +1122,12 @@ const MOBILE_SCRIPTS = [
       // VAULT_TYPE guard is inside installFolderRefreshWatch itself (no-op
       // ל-local/server).
       installFolderRefreshWatch();
+
+      // pull-sync "Sync now" trigger (the pull-sync brief
+      // §2/§3ד) — VAULT_TYPE + config guards are inside installSyncNowTrigger
+      // itself (no-op unless local vault + a stored ow-sync: config, brief
+      // §5 DoD#6).
+      installSyncNowTrigger();
 
       // ── שם-כספת מוצג מה-registry (docs/plans/vault-name-display.md §2/§3) ──
       // לכספת OPFS (local/folder) עם רשומת-registry, __owV.name הוא השם

@@ -1,7 +1,6 @@
 # Architecture — obsidian-web
 
-> קהל: מי שמשנה את הקוד (סוכן/מתחזק). ה"למה", לא ה"איך-משתמשים" (זה `docs/`).
-> ההחלטה המלאה: `agent-context/decisions/obsidian-web.md` (entry 2026-07-19).
+> קהל: מי שמשנה את הקוד. ה"למה", לא ה"איך-משתמשים" (זה `README.md`).
 
 ## מה זה
 מריצים את ה-renderer של Obsidian (בַּאנדל upstream, `vendor/obsidian-mobile/`)
