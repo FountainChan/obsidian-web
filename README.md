@@ -226,6 +226,21 @@ This repository does **not** include Obsidian's source code. The `vendor/obsidia
 
 If the Obsidian team has any concerns about this project, please [open an issue](https://github.com/MusiCode1/obsidian-web/issues) and we will address them promptly.
 
+## License
+
+[GNU General Public License v3.0](LICENSE) (`GPL-3.0-only`).
+
+**This applies to obsidian-web's own code only** — everything under `src/` and `scripts/`.
+You are free to use, study, modify and redistribute it; if you distribute a modified
+version, it must also be GPL-3.0 and its source must be available.
+
+It does **not** apply to Obsidian itself. The `vendor/` directories hold Obsidian's own
+proprietary bundle, are gitignored, are never redistributed by this project, and remain
+governed solely by [Dynalist Inc.'s Terms of Service](https://obsidian.md/terms). Nothing
+here grants any rights over Obsidian's code. obsidian-web does not modify Obsidian's
+source in this repository — the setup scripts download it and apply a small set of
+documented patches to **your local copy** at install time.
+
 ## Credits
 
 Built by [MusiCode1](https://github.com/MusiCode1) and [Claude Code](https://claude.ai/code).
