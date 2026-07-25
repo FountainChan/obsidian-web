@@ -2,7 +2,7 @@
 
 Run Obsidian in a standard browser — no Electron, no native app needed.
 
-**[Live Demo →](https://obsidian-web.tzlev.ovh)**
+**[Live Demo →](https://obsidian-online.pages.dev)**
 
 obsidian-web loads Obsidian's original renderer (`app.js`) completely unmodified and replaces every Node.js / Electron dependency with lightweight HTTP shims. The result is real Obsidian running in any modern browser.
 
@@ -28,7 +28,7 @@ The browser version can load faster than the desktop app. Instead of Obsidian re
 | Storage | Real filesystem | Durable Object (in-memory) |
 | Persistence | Full | R2 (optional) or reset every N hours |
 | Use case | Personal use, self-hosted | Public demo, zero-maintenance |
-| URL | `http://localhost:3000` | [obsidian-web.tzlev.ovh](https://obsidian-web.tzlev.ovh) |
+| URL | `http://localhost:3000` | [obsidian-online.pages.dev](https://obsidian-online.pages.dev) |
 
 ## Repo layout
 
