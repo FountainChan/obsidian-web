@@ -23,7 +23,7 @@
   <!-- overrides.css: מסך-רחב (720-899px) — צמצום .mobile-vault-chooser-content
        + מיקום .mobile-onboarding-navbar סמוך לתוכן. path מוחלט (לא יחסי) כי
        <base href="/"> קיים למעלה. חייב לבוא **אחרי** app.css (order+specificity
-       גוברים). ראה docs/plans/mobile-layout-wide.md (docs-repo) + overrides.css. -->
+       גוברים). ראה the mobile-layout-wide brief + overrides.css. -->
   <link href="/client-mobile/overrides.css?v=1" type="text/css" rel="stylesheet"/>
   <style>
     #ow-loading {
@@ -67,7 +67,7 @@
   <script src="/client-mobile/storage/opfs-store.js?v=1"></script>
   <script src="/client-mobile/storage/folder-handle-store.js?v=1"></script>
 
-  <!-- 0b. Pull-sync engine (docs-repo brief server-sync-pull.md §2) — v1 =
+  <!-- 0b. Pull-sync engine (the pull-sync brief §2) — v1 =
        OPFS-local vaults only. Must load before boot.js so
        window.__owSync* are ready when boot.js mounts the "Sync now" button
        (guarded on window.__owVaultType==='local' + a stored config). Order

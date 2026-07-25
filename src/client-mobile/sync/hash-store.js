@@ -1,5 +1,5 @@
 /**
- * hash-store.js — IndexedDB persistence for the pull-sync engine (docs-repo
+ * hash-store.js — IndexedDB persistence for the pull-sync engine (
  * brief server-sync-pull.md §2/§3א/§3ג). Pattern copied from
  * `folder-handle-store.js` (window-attached IIFE, one DB per purpose,
  * Promise-wrapped indexedDB callbacks) — browser-only (indexedDB isn't

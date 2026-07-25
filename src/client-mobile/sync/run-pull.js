@@ -1,5 +1,5 @@
 /**
- * run-pull.js — pull-sync orchestrator (docs-repo brief server-sync-pull.md
+ * run-pull.js — pull-sync orchestrator (the pull-sync brief
  * §2/§3ד). Wires the other 4 sync/ modules together into one "Sync now"
  * flow: list (remote manifest) → hash (local manifest) → decide
  * (decide-pull.js) → download (blob → OPFS write → hash-store upsert).

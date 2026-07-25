@@ -1,5 +1,5 @@
 /**
- * decide-pull.js — pure decision function for the pull-sync engine (docs-repo
+ * decide-pull.js — pure decision function for the pull-sync engine (
  * brief server-sync-pull.md §3ב). Content-hash based (not mtime): given the
  * remote manifest, the local per-file hashes, and the last-synced-hash store,
  * decide per remote path whether to `download`, `skip`, or `conflictSkip`.

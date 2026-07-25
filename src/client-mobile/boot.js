@@ -876,7 +876,7 @@ const MOBILE_SCRIPTS = [
     });
   }
 
-  // ── pull-sync "Sync now" trigger (docs-repo brief server-sync-pull.md
+  // ── pull-sync "Sync now" trigger (the pull-sync brief
   // §2/§3ד, pattern reused from installFolderRefreshWatch's manual-refresh
   // button above) ─────────────────────────────────────────────────────────
   // v1 = OPFS-local vaults only (brief §3א round-3 finding — the sync
@@ -1123,7 +1123,7 @@ const MOBILE_SCRIPTS = [
       // ל-local/server).
       installFolderRefreshWatch();
 
-      // pull-sync "Sync now" trigger (docs-repo brief server-sync-pull.md
+      // pull-sync "Sync now" trigger (the pull-sync brief
       // §2/§3ד) — VAULT_TYPE + config guards are inside installSyncNowTrigger
       // itself (no-op unless local vault + a stored ow-sync: config, brief
       // §5 DoD#6).

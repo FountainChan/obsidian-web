@@ -1,6 +1,6 @@
 /**
  * remote-client.js — thin HTTP client over the sync-server's `/sync/v1`
- * protocol (docs-repo brief server-sync-pull.md §2/§3א; server side lives in
+ * protocol (the pull-sync brief §2/§3א; server side lives in
  * `src/sync-server/`, a separate slice/package).
  *
  * `manifest()` → {cursor, entries:[{path,size,hash}]}, `blob(hash)` → bytes

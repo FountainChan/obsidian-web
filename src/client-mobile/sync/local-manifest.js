@@ -1,6 +1,6 @@
 /**
  * local-manifest.js — builds the local side of the pull-sync decision
- * (docs-repo brief server-sync-pull.md §2/§3א). Wraps `OpfsStore.
+ * (the pull-sync brief §2/§3א). Wraps `OpfsStore.
  * watchAndStatAll()` (contract verified by executor spike §0.1(3): returns
  * `{children:[{name,type,size,mtime}]}`, `name` = full relative path,
  * including directories as `type:'directory'`), filters to files, and

@@ -1,7 +1,7 @@
 {
   "name": "obsidian-sync-server",
   "version": "0.1.0",
-  "description": "Lean pull-sync server for obsidian-web — /sync/v1 hash-based protocol (manifest + blob) behind DDoS-resistant Bearer auth. Separate package from runtime-server (see docs-repo brief sync-server.md §0).",
+  "description": "Lean pull-sync server for obsidian-web — /sync/v1 hash-based protocol (manifest + blob) behind DDoS-resistant Bearer auth. Separate package from runtime-server (see the sync-server brief §0).",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
