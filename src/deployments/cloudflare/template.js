@@ -277,11 +277,30 @@ Nested tags appear as a hierarchy in the tag pane.
 
 ## Tags in This Vault
 
-| Tag | Notes |
-|-----|-------|
-| #demo | Welcome, Tags |
-| #features | Markdown, Links, Tags |
-| #architecture | How It Works |
+A static table here would go stale the moment a tag changes anywhere in the vault — these
+[[Features/Dataview Queries|Dataview]] queries compute it live instead. (Labels below use
+\`#tagname\`-in-backticks, same as "Inline Tags" above, so the label itself doesn't become a tag.)
+
+\`#demo\`
+\`\`\`dataview
+LIST
+FROM #demo
+SORT file.name ASC
+\`\`\`
+
+\`#features\`
+\`\`\`dataview
+LIST
+FROM #features
+SORT file.name ASC
+\`\`\`
+
+\`#architecture\`
+\`\`\`dataview
+LIST
+FROM #architecture
+SORT file.name ASC
+\`\`\`
 
 ← [[Features/Links and Backlinks]] | [[Welcome]]
 
