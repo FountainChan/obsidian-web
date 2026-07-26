@@ -54,6 +54,11 @@ test('computeWant returns null for a non-object overrides value', () => {
   assert.equal(bridge.computeWant('nope', null), null);
 });
 
+test('computeWant returns null for an overrides object with neither isMobile nor isDesktop — "existing" is not "valid" (calev round 2, brief §3.0/§3.3 "המלכודת")', () => {
+  assert.equal(bridge.computeWant({}, null), null);
+  assert.equal(bridge.computeWant({ isPhone: true, isTablet: false }, null), null);
+});
+
 test('computeWant mirrors isMobile/isDesktop from overrides and always locks isMobileApp:true (§3.2, never derived)', () => {
   const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true, isPhone: false, isTablet: false, isDesktopApp: false }, null);
   assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
@@ -76,17 +81,18 @@ test('computeWant: EmulateMobile is checked by truthiness of the raw value, not 
   assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
 });
 
-// ── isEmulateActive (second calev pass, live: localStorage.EmulateMobile="0" was
-// turning emulation ON because the string "0" is truthy in JS) ──
+// ── isEmulateActive (THIRD calev pass — round 2 special-cased "0"/"false" as
+// OFF here, which desynced this function from the bundle's own guard AND
+// from obsidian-web-layout/main.js's isEmulateMobileActive() — both plain
+// truthiness, both treat "0" as ON. That desync produced a real "half-state"
+// bug live: this bridge said desktop while the bundle's guard ran the
+// mobile-emulation block anyway. Reverted to plain truthiness — surprising,
+// but consistent with the other two readers of the same key; see the
+// function's own comment.) ──
 
-test('isEmulateActive treats the string "0" as OFF, not truthy-and-therefore-on', () => {
-  assert.equal(bridge.isEmulateActive('0'), false);
-});
-
-test('isEmulateActive treats the string "false" (any case) as OFF', () => {
-  assert.equal(bridge.isEmulateActive('false'), false);
-  assert.equal(bridge.isEmulateActive('False'), false);
-  assert.equal(bridge.isEmulateActive('FALSE'), false);
+test('isEmulateActive is plain truthiness — "0" is ON here too, matching the bundle\'s own guard and obsidian-web-layout/main.js (NOT the "0"/"false" special-case from a prior, since-reverted round)', () => {
+  assert.equal(bridge.isEmulateActive('0'), true);
+  assert.equal(bridge.isEmulateActive('false'), true);
 });
 
 test('isEmulateActive treats null/undefined/empty-string as OFF', () => {
@@ -101,9 +107,9 @@ test('isEmulateActive treats "1"/"true"/arbitrary truthy strings as ON', () => {
   assert.equal(bridge.isEmulateActive('yes'), true);
 });
 
-test('computeWant: EmulateMobile="0" does NOT activate emulation — regression for the live-caught bug above', () => {
+test('computeWant: EmulateMobile="0" DOES activate emulation — matches the bundle\'s own guard (regression guard for the third-round revert; the second round\'s "0"=OFF behavior must NOT come back)', () => {
   const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '0');
-  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
+  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false });
 });
 
 // ── shouldWrapAddClass (§3.3 — "the exact condition, all three caveats folded in") ──
@@ -125,14 +131,17 @@ test('shouldWrapAddClass is false when want is null — the §3.0 trap: on an em
 test('exposes named, positive tick/time budgets instead of magic numbers', () => {
   assert.equal(typeof bridge.CAPTURE_TICK_CEILING, 'number');
   assert.ok(bridge.CAPTURE_TICK_CEILING > 0);
-  assert.equal(typeof bridge.GLOBAL_SAFETY_NET_MS, 'number');
-  assert.ok(bridge.GLOBAL_SAFETY_NET_MS > 0);
-  // brief §3.1a: this is now a last-resort-only fallback (app.js's own
-  // `load` event is the normal give-up anchor), so it must be generous —
-  // regression guard against re-introducing a short deadline that races
-  // app.js's own download time (finding 1: 5000ms was 92% consumed at
-  // 3 Mbps).
-  assert.ok(bridge.GLOBAL_SAFETY_NET_MS >= 15000);
+  assert.equal(typeof bridge.CRASH_GUARD_MS, 'number');
+  assert.ok(bridge.CRASH_GUARD_MS > 0);
+  // brief §3.1a, third round: capture is anchored ONLY to app.js's own
+  // load/error events now — this is a crash-guard that should never fire in
+  // normal operation, not a give-up deadline. Regression guard against
+  // re-introducing a short deadline that races app.js's own download time
+  // (the exact bug this slice burned three calev rounds fixing: finding 1
+  // measured 5000ms as 92% consumed at 3 Mbps; finding 2 measured the
+  // "generous" 30000ms follow-up still failing at 200 kbps). Generous means
+  // minutes, not seconds.
+  assert.ok(bridge.CRASH_GUARD_MS >= 120000);
   assert.equal(typeof bridge.ADDCLASS_SAFETY_NET_MS, 'number');
   assert.ok(bridge.ADDCLASS_SAFETY_NET_MS > 0);
 });

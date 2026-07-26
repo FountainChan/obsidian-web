@@ -34,7 +34,14 @@ const MODES = ['auto', 'mobile', 'desktop'];
 
 function isEmulateMobileActive() {
   // Truthy VALUE, not mere key existence — mirrors the bundle's own guard
-  // and platform-bridge.js's computeWant() (brief §3.5).
+  // and platform-bridge.js's computeWant() (brief §3.5). Surprising but
+  // deliberate: `localStorage.EmulateMobile = "0"` is ON here, same as in
+  // the bundle and in platform-bridge.js's isEmulateActive() — a plain
+  // `!!value` check on a string is not "0 means off". A prior round of this
+  // slice special-cased "0"/"false" as OFF in platform-bridge.js ONLY,
+  // which desynced it from this exact line and produced a real half-state
+  // bug (calev, third pass). If "0" ever needs to mean OFF, it must change
+  // in all three readers of this key at once — never here alone.
   return !!localStorage.getItem(EMULATE_MOBILE_KEY);
 }
 

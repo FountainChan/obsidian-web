@@ -51,19 +51,23 @@
   // shape ever changes so the assignment never lands.
   var CAPTURE_TICK_CEILING = 500;
 
-  // Absolute wall-clock upper bound — brief §3.1a (post-calev fix): this is
-  // NOT the normal give-up path. The normal path is anchored to app.js's
-  // own `load` event (see notifyAppJsLoaded() below), because a plain
-  // wall-clock deadline from install() was measured to count Obsidian's own
-  // bundle-DOWNLOAD time (13 scripts + vault verification happen before
-  // app.js is even injected) — 92% of a 5000ms budget consumed at 3 Mbps,
-  // a perfectly ordinary mobile connection. This timer exists purely as a
-  // last-resort guarantee that Object.defineProperty gets restored even if
-  // app.js's <script> element NEVER fires `load` at all (e.g. the request
-  // fails outright). Deliberately long: unlike the old deadline, this one
-  // no longer races a normal download, so there is no cost to being
-  // generous (brief §3.1a: "רשת-ביטחון בשעון-קיר נשארת... אבל ארוכה").
-  var GLOBAL_SAFETY_NET_MS = 30000;
+  // Crash-guard ONLY — brief §3.1a, THIRD round: the second round's fix
+  // ("anchor to app.js's `load` event, but keep a 30s wall-clock give-up
+  // too") still contained a wall-clock DEADLINE on capture, and any deadline
+  // reproduces the exact same silent failure once the network is slow
+  // enough — calev measured it live: at 200 kbps app.js lands at 46.4s,
+  // past that round's 30s bound, same failure, word for word. The bug was
+  // never the constant's SIZE; it was that a timer "gave up" on capture at
+  // all while app.js could still legitimately be on the wire. Capture is now
+  // anchored ONLY to app.js's own <script> element settling — either
+  // notifyAppJsLoaded() (native `load`) or notifyAppJsFailed() (native
+  // `error`, boot.js's existing s.onerror) — see both below. THIS timer
+  // fires only if NEITHER of those two ever happens, i.e. app.js's <script>
+  // element never settles at all (should be impossible in a browser; this
+  // guards the "impossible" case, e.g. some future change breaks the
+  // load/error wiring). Documented as: this should never fire. Generous on
+  // purpose — 5 minutes — because it no longer races anything real.
+  var CRASH_GUARD_MS = 5 * 60 * 1000;
 
   // Mirrors the spike's addClass safety net: if document.body's "is-mobile"
   // class is never added (so the wrapped addClass never self-restores — see
@@ -92,17 +96,25 @@
       ('isMobileApp' in P) && ('canPinSidebar' in P);
   }
 
-  // brief §3.5 says "truthy VALUE, not mere key existence" — but a plain JS
-  // `!!value` check is wrong here: localStorage always stores strings, and
-  // the strings "0" and "false" are both truthy in JS while every human
-  // (and every other on/off flag in this codebase) reads them as "off". A
-  // second calev pass on this exact slice caught it live:
-  // `localStorage.EmulateMobile = "0"` was turning emulation ON. Treat "0"/
-  // "false" (case-insensitively) the same as the empty string.
+  // brief §3.5 says "truthy VALUE, not mere key existence" — and THIRD-round
+  // fix: "truthy" means exactly what the BUNDLE's own guard means by it
+  // (`localStorage.getItem(Zee) &&`), not human intuition about "0"/"false"
+  // strings. A second calev pass special-cased "0"/"false" as OFF here —
+  // which looked reasonable in isolation but desynced this function from
+  // the TWO OTHER readers of the identical `EmulateMobile` key: the bundle's
+  // own guard and obsidian-web-layout/main.js's isEmulateMobileActive()
+  // (both plain `!!localStorage.getItem(...)`, both treat "0" as ON). A
+  // third calev pass caught the result live: with
+  // `localStorage.EmulateMobile = "0"`, this bridge said OFF while the
+  // bundle's guard ran the mobile-emulation block anyway — the exact
+  // "half-state" brief §3.5 declared impossible (mixed is-mobile/desktop
+  // flags, layout switcher permanently disabled for a feature the bridge
+  // insisted wasn't even active). Consistency with the bundle wins over
+  // intuition: `"0"` is surprising but ON, same as everywhere else this key
+  // is read. If that ever needs to change, it must change in all three
+  // places at once — never here alone.
   function isEmulateActive(value) {
-    if (!value) return false;
-    var normalized = String(value).toLowerCase();
-    return normalized !== '0' && normalized !== 'false';
+    return !!value;
   }
 
   // Combines brief §3.0 (fallback when __owPlatformOverrides is missing) and
@@ -121,6 +133,17 @@
       return { isMobile: true, isMobileApp: true, isDesktop: false };
     }
     if (!overrides || typeof overrides !== 'object') return null;
+    // calev (round 2) — "existing" is not "valid": window.__owPlatformOverrides
+    // = {} is a plain object, so the check above alone let it through, and
+    // shouldWrapAddClass() then wrapped addClass off an overrides value that
+    // never actually said anything about isMobile/isDesktop. Brief §3.0/§3.3
+    // name this trap explicitly ("המלכודת") and require `want` to be
+    // "קיים ותקף" (existing AND valid) — require at least one of the two
+    // flags this module actually locks-from to be present in overrides
+    // before treating it as a real decision. Not reachable through boot.js
+    // today (it always publishes all six flags), but the guard the brief
+    // asked for belongs here regardless of today's only caller.
+    if (!('isMobile' in overrides) && !('isDesktop' in overrides)) return null;
     return {
       isMobile: !!overrides.isMobile,
       isMobileApp: true, // brief §3.2: always locked true, never derived from overrides
@@ -141,7 +164,7 @@
     computeWant: computeWant,
     shouldWrapAddClass: shouldWrapAddClass,
     CAPTURE_TICK_CEILING: CAPTURE_TICK_CEILING,
-    GLOBAL_SAFETY_NET_MS: GLOBAL_SAFETY_NET_MS,
+    CRASH_GUARD_MS: CRASH_GUARD_MS,
     ADDCLASS_SAFETY_NET_MS: ADDCLASS_SAFETY_NET_MS,
     LOCKED_FLAGS: LOCKED_FLAGS,
   };
@@ -160,7 +183,12 @@
   var queue = [];            // { getter, tries } — brief §3.1 "תור מועמדים, לא מועמד יחיד"
   var pumpScheduled = false;
   var settled = false;       // true once we've captured (or globally given up) — stop everything
-  var appJsLoadSignalReceived = false; // set by notifyAppJsLoaded() — brief §3.1a
+  // Set by EITHER notifyAppJsLoaded() (native `load`) OR notifyAppJsFailed()
+  // (native `error`) — brief §3.1a, third round: exactly one of these two
+  // fires, exactly once, for app.js's <script> element. Either is equally
+  // definitive that "nothing more can ever be queued from app.js's own
+  // top-level evaluation", so both route through the same give-up check.
+  var appJsOutcomeSignalReceived = false;
 
   // One warning PER DISTINCT message, not one warning total (brief §3.1a
   // finding 3, calev): a single shared flag let an early, low-value warning
@@ -203,57 +231,78 @@
     if (Object.defineProperty === wrapped) Object.defineProperty = orig;
   }
 
-  // Global safety net (brief §3.1 "רשת-ביטחון: משחזרים בכל מקרה אחרי חלון
-  // קצוב, גם אם לא נלכד כלום") — real wall-clock timer, independent of the
-  // microtask-driven queue above. Per §3.1a this is now a LAST-RESORT path
-  // only (app.js never finished loading at all); the normal give-up path is
-  // notifyAppJsLoaded() below and pump()'s post-load queue-drain check.
+  // Crash-guard (brief §3.1a, THIRD round). Not a normal give-up path at
+  // all — see CRASH_GUARD_MS's own comment above. The two real anchors are
+  // notifyAppJsLoaded() and notifyAppJsFailed() below; this timer only fires
+  // if app.js's <script> element never settles either way, which should be
+  // impossible in a browser.
   setTimeout(function () {
     if (settled) return;
     settled = true;
     restoreDefineProperty();
-    reportCaptureFailure('global-safety-net',
-      'capture never completed within the ' + (GLOBAL_SAFETY_NET_MS / 1000) +
-      's absolute fallback (app.js may have failed to load); running with Platform unmodified. Try reloading the page.');
-  }, GLOBAL_SAFETY_NET_MS);
+    reportCaptureFailure('crash-guard',
+      'capture never completed within the ' + (CRASH_GUARD_MS / 1000) +
+      's crash-guard — app.js\'s <script> element never fired load OR error, which should not be possible; running with Platform unmodified. Try reloading the page.');
+  }, CRASH_GUARD_MS);
 
-  // Called by boot.js once app.js's OWN <script> element fires its native
-  // `load` event (brief §3.1a) — this is the anchor for "give up on
-  // capture", replacing the wall-clock deadline that used to count
-  // Obsidian's own bundle-download time (finding 1). By the time `load`
-  // fires, app.js's synchronous top-level evaluation — where the real
-  // defineProperty('Platform', ...) call happens (webpack's export map,
-  // n.d(e,{Platform:()=>bn})) — has already run to completion. So:
-  //   · if NO candidate was ever queued, the export shape must have
-  //     changed — nothing left to wait for, give up right away.
-  //   · if a candidate WAS queued but hasn't resolved yet (bn's assignment
-  //     lands a couple microtask ticks later per the spike's measurement),
-  //     its own per-candidate ceiling (tick-based, not ms — CAPTURE_TICK_
-  //     CEILING) keeps governing it via the normal pump() path; pump()'s
-  //     own post-load queue-drain check (below) takes over from there.
-  function notifyAppJsLoaded() {
-    if (settled || appJsLoadSignalReceived) return;
-    appJsLoadSignalReceived = true;
+  // Shared give-up check for both of app.js's <script>-element outcomes
+  // (brief §3.1a, third round: "לעגן בשני אירועים"). By the time EITHER
+  // `load` or `error` fires, app.js's synchronous top-level evaluation —
+  // where the real defineProperty('Platform', ...) call would happen
+  // (webpack's export map, n.d(e,{Platform:()=>bn})) — has already either
+  // run to completion (`load`) or never run at all (`error`, the request
+  // itself failed). Either way:
+  //   · if NO candidate was ever queued, nothing is left to wait for — give
+  //     up right away.
+  //   · if a candidate WAS queued but hasn't resolved yet (only possible on
+  //     the `load` path — bn's assignment lands a couple microtask ticks
+  //     later per the spike's measurement), its own per-candidate ceiling
+  //     (tick-based, not ms — CAPTURE_TICK_CEILING) keeps governing it via
+  //     the normal pump() path; pump()'s own post-load queue-drain check
+  //     (below) takes over from there.
+  function onAppJsSettled(giveUpMessage) {
+    if (settled || appJsOutcomeSignalReceived) return;
+    appJsOutcomeSignalReceived = true;
     // One microtask hop of margin (brief §3.1a "ניקוז microtasks, ticks לא
     // ms") before deciding — defensive: per HTML's task/microtask-queue
     // ordering this is already guaranteed to run after any pump() turn
     // queued during app.js's own synchronous evaluation, but checking
     // straight from a queued microtask (rather than synchronously inside
-    // this call, which runs from boot.js's script-load task handler) keeps
-    // this independent of that guarantee.
+    // this call, which runs from boot.js's script-load/error task handler)
+    // keeps this independent of that guarantee.
     queueMicrotask(function () {
       if (settled) return;
       if (queue.length === 0) {
         settled = true;
         restoreDefineProperty();
-        reportCaptureFailure('no-candidate-post-load',
-          'app.js finished loading but no Platform export was ever intercepted; running with Platform unmodified. Try reloading the page.');
+        reportCaptureFailure('no-candidate-post-load', giveUpMessage);
       }
-      // else: a real candidate is mid-flight — see pump()'s post-load
-      // queue-drain check for what happens once it settles.
+      // else: a real candidate is mid-flight (load path only) — see
+      // pump()'s post-load queue-drain check for what happens once it
+      // settles.
     });
   }
+
+  // Called by boot.js once app.js's OWN <script> element fires its native
+  // `load` event — the anchor for the common case (finding 1: replaces the
+  // wall-clock deadline that used to count Obsidian's own bundle-download
+  // time).
+  function notifyAppJsLoaded() {
+    onAppJsSettled('app.js finished loading but no Platform export was ever intercepted; running with Platform unmodified. Try reloading the page.');
+  }
   window.__owPlatformBridge.notifyAppJsLoaded = notifyAppJsLoaded;
+
+  // Called by boot.js once app.js's OWN <script> element fires its native
+  // `error` event (brief §3.1a, third round — previously missing: only the
+  // success path had an anchor, so a network failure fell all the way
+  // through to whatever wall-clock fallback existed). app.js's request
+  // failed outright, so its top-level code never ran — nothing can ever be
+  // queued from it, and this settles immediately (no in-flight candidate is
+  // possible on this path, unlike the `load` case above).
+  function notifyAppJsFailed() {
+    onAppJsSettled('app.js failed to load (network error); running with Platform unmodified. Try reloading the page.');
+  }
+  window.__owPlatformBridge.notifyAppJsFailed = notifyAppJsFailed;
 
   function schedulePump() {
     if (pumpScheduled || settled) return;
@@ -313,11 +362,11 @@
     // on the wall-clock fallback (brief §3.1a finding 2: "תקרה פר-מועמד
     // חייבת לשחזר defineProperty סינכרונית" — an existing §3.1 requirement
     // that wasn't met, not a new one).
-    if (appJsLoadSignalReceived && !settled) {
+    if (appJsOutcomeSignalReceived && !settled) {
       settled = true;
       restoreDefineProperty();
       reportCaptureFailure('queue-drained-post-load',
-        'app.js finished loading and the capture queue drained with nothing captured; running with Platform unmodified. Try reloading the page.');
+        'app.js\'s <script> settled and the capture queue drained with nothing captured; running with Platform unmodified. Try reloading the page.');
     }
   }
 

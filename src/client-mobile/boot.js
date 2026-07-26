@@ -395,13 +395,42 @@ const MOBILE_SCRIPTS = [
     if (statusEl) statusEl.textContent = text;
   }
 
+  // אלמנט נפרד מ-#ow-loading/#ow-status (calev, סבב-תיקון שלישי, ממצא 3):
+  // #ow-status נמחק/נדרס לפני שהמשתמש מספיק לקרוא אותו בתרחיש-הכשל הריאלי —
+  // נמדד: ההודעה מופיעה, נדרסת ע"י ה-onload הבא ("Loading Obsidian mobile
+  // (14/14)") ואז #ow-loading כולו מוסר לגמרי כש-.workspace מתרנדר, עוד לפני
+  // שהמשתמש קרא משהו. הבאנר הזה הוא אלמנט **עצמאי**, ילד ישיר של <body> ולא
+  // של #ow-loading — removeLoadingOverlayWhen() (למטה) לעולם לא נוגע בו,
+  // ושום setStatus() עתידי לא כותב לתוכו. נוצר lazily (רק בכשל ראשון) כדי
+  // שלא יתווסף DOM מיותר במסלול-ההצלחה הרגיל.
+  var platformWarningEl = null;
+  function showPlatformFailureBanner(text) {
+    if (!platformWarningEl) {
+      platformWarningEl = document.createElement('div');
+      platformWarningEl.id = 'ow-platform-warning';
+      platformWarningEl.style.cssText = [
+        'position:fixed', 'left:0', 'right:0', 'bottom:0',
+        'background:#5a1e1e', 'color:#fff', 'padding:10px 16px',
+        'font:13px -apple-system, BlinkMacSystemFont, sans-serif',
+        'z-index:100000', 'box-shadow:0 -1px 6px rgba(0,0,0,0.4)',
+      ].join(';');
+      document.body.appendChild(platformWarningEl);
+    }
+    platformWarningEl.textContent = text;
+  }
+
   // חשוף עבור platform-bridge.js (נטען לפני script זה — index.html) — קו-
   // 3.1א בבריף: אם ה-bridge בסופו-של-דבר מוותר על לכידת Platform, אזהרת
   // console בלבד בלתי-נראית למשתמש. שורה זו רצה מוקדם וסינכרונית, הרבה לפני
   // ש-app.js אפילו מוזרק — עד שה-bridge יכול לקרוא לזה בכלל (רק אחרי ש-app.js
   // נטען, או אחרי רשת-הביטחון הארוכה), ה-hook כבר קיים.
+  //
+  // כותב לשני מקומות: setStatus() (עדיין מועיל בזמן שהספינר גלוי) וגם
+  // showPlatformFailureBanner() — זה מה ש**שורד** אחרי ש-#ow-loading מוסר
+  // ואחרי onload-ים מאוחרים יותר שדורסים את #ow-status (calev ממצא 3).
   window.__owReportPlatformFailure = function (msg) {
     setStatus(msg);
+    showPlatformFailureBanner(msg);
   };
 
   // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
@@ -429,6 +458,15 @@ const MOBILE_SCRIPTS = [
         s.onerror = function () {
           console.error('[obsidian-web] failed to load: ' + src);
           setStatus('Error loading ' + src.split('/').pop());
+          // עוגן שני-ל-חלון-הלכידה (docs/plans/runtime-platform-descriptors.md
+          // §3.1a, סבב-תיקון שלישי) — אם app.js עצמו נכשל ברשת (`error`, לא
+          // `load`), ל-platform-bridge.js אין דרך אחרת לדעת שהקוד הסינכרוני
+          // שלו לעולם לא ירוץ; בלי זה הלכידה הייתה תלויה ב-crash-guard
+          // (5 דקות) בלבד לתרחיש הזה בדיוק.
+          if (src === appJsSrc && window.__owPlatformBridge &&
+              typeof window.__owPlatformBridge.notifyAppJsFailed === 'function') {
+            window.__owPlatformBridge.notifyAppJsFailed();
+          }
         };
         document.head.appendChild(s);
       })(MOBILE_SCRIPTS[i]);
