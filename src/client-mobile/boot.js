@@ -751,6 +751,31 @@ const MOBILE_SCRIPTS = [
     obs.observe(document.body, { childList: true, subtree: true });
   }
 
+  // ── מספר-גרסה (§3.4) — לצד רכיב-הגרסה הקיים בכותרת-התחתונה של ה-onboarding ──
+  // window.__owVersion מוזרק רק ע"י בניית ה-CF (אותו ערוץ נפרד של __owBackend,
+  // §3.2) — בפריסת runtime-server הוא לעולם לא מוגדר ⇒ מציגים רק את הגרסה של
+  // Obsidian (הקיימת, ללא שינוי), לא "undefined". ה-footer (`.mod-version`)
+  // מרונדר ע"י מחלקת-הבסיס של מסכי ה-onboarding — לכל שלב-אשף יש instance
+  // משלו (הבקר שומר previousScreens) ⇒ MutationObserver מחיל מחדש בכל מסך,
+  // לא פעם אחת. הטקסט הקיים (`1.12.7`, קבוע בבאנדל) נקרא מה-DOM ולא מוכפל
+  // כליטרל חדש — נמנעים מהכפילות השישית (הבריף מזהה 4 כפילויות פונקציונליות
+  // קיימות + אזהרה מפורשת לא להוסיף עוד אחת).
+  function installVersionDisplay() {
+    if (!window.__owVersion) return;   // runtime-server / no-config → כלום, רק Obsidian
+    function apply() {
+      var els = document.querySelectorAll('.mobile-onboarding .mobile-onboarding-screen > footer > .mod-version');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.__owVersioned) continue;   // idempotent — פר-instance, לא re-prefix על מוטציה חוזרת
+        el.__owVersioned = true;
+        el.textContent = 'obsidian-web ' + window.__owVersion + ' · Obsidian ' + el.textContent;
+      }
+    }
+    apply();
+    var obs = new MutationObserver(apply);
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+
   // ── מסך-פתיחה נייטיב (no-vault) ─────────────────────────────────────────────
   // אין VAULT_ID תקף (לא ב-/vault/<id> path, forceStarter, או שה-entry redirect
   // למעלה כבר קבע שאין כספת-אחרונה — ראה למעלה). ה-shims כבר מותקנים (require/capacitor) — מזריקים
@@ -764,6 +789,7 @@ const MOBILE_SCRIPTS = [
     installCreateVaultInterceptor();
     installExternalStorageGate();
     installDemoVaultButton();
+    installVersionDisplay();
     seedNativeVaultList()
       .catch(function (err) { console.warn('[obsidian-web] seedNativeVaultList failed:', err); })
       .then(function () {

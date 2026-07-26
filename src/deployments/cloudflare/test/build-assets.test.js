@@ -68,20 +68,24 @@ test('build-assets.sh: plugins install/enabled follow config.json + index.html g
   expect(html.indexOf(expectedSnippet)).toBeLessThan(html.indexOf('src="/client-mobile/deploy-config.js'));
 }, 120000);
 
-// ── §3.2 — client-only backend flag (docs/plans/client-only-resilience.md) ──
+// ── §3.2/§3.4 — client-only backend flag + version (docs/plans/client-only-resilience.md) ──
 
-test('build-assets.sh: index.html gets window.__owBackend="none" before deploy-config.js', () => {
+const VERSION_PATH = path.join(MAIN_DIR, 'src', 'config', 'version.json');
+
+test('build-assets.sh: index.html gets window.__owBackend="none" + window.__owVersion before deploy-config.js', () => {
   execSync('bash scripts/build-assets.sh', {
     cwd: CF_DIR,
     stdio: 'pipe',
     timeout: 120000,
   });
 
+  const version = JSON.parse(fs.readFileSync(VERSION_PATH, 'utf8')).version;
   const html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
 
   expect(html).not.toContain('<!-- OW_BACKEND_INJECT -->');
-  expect(html).toContain('<script>window.__owBackend="none";</script>');
-  expect(html.indexOf('window.__owBackend')).toBeLessThan(html.indexOf('src="/client-mobile/deploy-config.js'));
+  const expectedSnippet = '<script>window.__owBackend="none";window.__owVersion=' + JSON.stringify(version) + ';</script>';
+  expect(html).toContain(expectedSnippet);
+  expect(html.indexOf(expectedSnippet)).toBeLessThan(html.indexOf('src="/client-mobile/deploy-config.js'));
 }, 120000);
 
 // DoD#11 — the injection step must be a bare command (not swallowed by `if
