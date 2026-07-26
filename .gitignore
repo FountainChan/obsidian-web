@@ -1,5 +1,11 @@
-# Vendor — extracted Obsidian bundles (regeneratable via scripts/update-obsidian.js)
-vendor/
+# Vendor — extracted Obsidian bundles (regeneratable via scripts/update-obsidian.js).
+# No trailing slash: some worktrees carry `vendor` as a symlink (e.g.
+# `vendor -> ../../dev/vendor`), and a `dir/` pattern with a trailing slash
+# only matches directories in git's own semantics — a symlink is not one, so
+# `git check-ignore vendor` on that layout would exit 1 (untracked, unprotected;
+# a `git add -A` could accidentally stage the symlink itself). The bare
+# pattern below matches a directory, a file, or a symlink named `vendor`.
+vendor
 
 # Node
 node_modules/
