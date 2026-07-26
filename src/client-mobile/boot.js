@@ -609,6 +609,14 @@ const MOBILE_SCRIPTS = [
         var title = (titleEl && titleEl.textContent) || '';
         location_ = /app storage/i.test(title) ? 'app' : 'external';
       }
+      // §3.1ב layer 1 (logic, mandatory) — the "Device storage" radio option
+      // renders already-selected (bundle default `.setValue('external')`,
+      // before any of our DOM hiding runs — installExternalStorageGate below
+      // is a MutationObserver, not synchronous). Firefox/Safari have no
+      // showDirectoryPicker at all, so DOM state must NEVER decide 'external'
+      // there — this override is what actually prevents the silent failure,
+      // independent of whether the visual gate has applied yet.
+      if (!('showDirectoryPicker' in window)) location_ = 'app';
 
       if (location_ === 'external') {
         // folder vault — choose()=showDirectoryPicker (opfs-ux) יוצר registry
@@ -624,6 +632,27 @@ const MOBILE_SCRIPTS = [
           .catch(function (err) {
             // picker בוטל/נכשל — כמו הנייטיב, שקט (canceled) או log בלבד.
             console.warn('[obsidian-web] Create vault (external) failed:', err && err.message || err);
+            // §3.1א — the real bug: this catch used to never reset the
+            // guard (capacitor-shim.js:311/312 resets it on ITS OWN mkdir
+            // fallback path, but that's a different call site). Two routes
+            // land here: CANCELED (Chromium — user dismissed the picker,
+            // capacitor-shim.js:479, the common one) and UNSUPPORTED
+            // (Firefox/Safari, :474 — should be unreachable now that the
+            // logic gate above forces 'app', but the visual gate is a
+            // MutationObserver and could theoretically still race it once).
+            // UNSUPPORTED reaching here despite the gate means the user
+            // really did hit a dead end — say so, not just console.warn
+            // (§3.1). CANCELED is a normal, expected user action (Escape) —
+            // no Notice; just let the guard reset so retry works.
+            if (err && err.code === 'UNSUPPORTED' && typeof window.Notice === 'function') {
+              new window.Notice('אחסון חיצוני אינו נתמך בדפדפן זה — נעשה שימוש באחסון פנימי (App storage)');
+            }
+            // Naive immediate reset re-opens the guard DURING the same
+            // physical click's pointerdown/mousedown/click trio (line ~648)
+            // when the throw is synchronous (UNSUPPORTED) — that would fire
+            // the Notice above up to 3×. setTimeout(...,0) resets after this
+            // tick's event trio has already run.
+            setTimeout(function () { window.__owCreatingVault = false; }, 0);
           });
       } else {
         var id2 = window.__owLocalVaults.create(name).id;   // OPFS (type ברירת-מחדל 'local')
@@ -638,6 +667,50 @@ const MOBILE_SCRIPTS = [
     ['pointerdown', 'mousedown', 'click'].forEach(function (evt) {
       document.addEventListener(evt, handler, true);
     });
+  }
+
+  // ── "אחסון חיצוני" gating בדפדפנים ללא showDirectoryPicker (§3.1ב, שכבה
+  // ויזואלית — משלימה, לא מחליפה, את התיקון הלוגי ב-installCreateVaultInterceptor
+  // למעלה) ───────────────────────────────────────────────────────────────────
+  // הבאנדל מרנדר את הרדיו "Device storage"/"App storage" עם `.setValue('external')`
+  // כברירת-מחדל — ללא קשר לדפדפן — ⇒ Firefox/Safari מציגים אפשרות **נבחרת**
+  // שלעולם לא יכולה לעבוד. הסתרה בלבד הייתה משאירה כשל-שקט אם מישהו איכשהו
+  // מגיע ל-external בכל זאת; הבחירה בפועל מועברת ל-"App storage" (קליק תכנותי
+  // דרך ה-listener הקיים של הבאנדל — ste.addOption רושם click→setValue).
+  // MutationObserver (לא DOM סטטי, כמו installDemoVaultButton למעלה): הרדיו
+  // הזה מרונדר גם במסך ה-onboarding הראשוני וגם במודל "Create new vault" —
+  // וכל שלב-אשף עשוי לרנדר-מחדש. לא רץ בכלל ב-Chromium (return מוקדם) — שם
+  // showDirectoryPicker עובד, אין מה לגדר.
+  function installExternalStorageGate() {
+    if ('showDirectoryPicker' in window) return;
+    function gate() {
+      var options = document.querySelectorAll('.mobile-onboarding-radio-option');
+      if (!options.length) return;
+      var externalOpt = null, appOpt = null;
+      for (var i = 0; i < options.length; i++) {
+        var titleEl = options[i].querySelector('.mobile-onboarding-radio-option-title');
+        var title = (titleEl && titleEl.textContent) || '';
+        if (/device storage/i.test(title)) externalOpt = options[i];
+        else if (/app storage/i.test(title)) appOpt = options[i];
+      }
+      if (!externalOpt || externalOpt.__owGated) return;   // idempotent — כבר טופל
+      externalOpt.__owGated = true;
+      var wasSelected = externalOpt.classList.contains('is-selected');
+      externalOpt.style.display = 'none';
+      if (wasSelected && appOpt) appOpt.click();   // מפעיל את ste.setValue הנייטיב
+      // הסבר (DoD#1: "מוסתרת... עם הסבר") — פעם אחת פר radio-group.
+      var group = externalOpt.parentNode;
+      if (group && group.parentNode && !group.parentNode.querySelector('.ow-external-gate-note')) {
+        var note = document.createElement('div');
+        note.className = 'ow-external-gate-note';
+        note.style.cssText = 'font-size:12px;opacity:.7;margin:4px 0 0;';
+        note.textContent = 'אחסון חיצוני אינו זמין בדפדפן זה — משתמשים באחסון פנימי (App storage).';
+        group.parentNode.insertBefore(note, group.nextSibling);
+      }
+    }
+    gate();
+    var obs = new MutationObserver(gate);
+    obs.observe(document.body, { childList: true, subtree: true });
   }
 
   // ── מסך-פתיחה נייטיב (no-vault) — כפתור "כספת דמו" (seed-demo §3ד) ─────────
@@ -689,6 +762,7 @@ const MOBILE_SCRIPTS = [
     setStatus('Loading Obsidian mobile...');
     installNativeVaultOpenBridge();
     installCreateVaultInterceptor();
+    installExternalStorageGate();
     installDemoVaultButton();
     seedNativeVaultList()
       .catch(function (err) { console.warn('[obsidian-web] seedNativeVaultList failed:', err); })
