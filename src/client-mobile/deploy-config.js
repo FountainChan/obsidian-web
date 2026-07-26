@@ -36,7 +36,8 @@
     seedExampleContent: true,
     plugins: {
       'obsidian-livesync': { install: true, enabled: false },
-      'obsidian-web-layout': { install: true, enabled: true }
+      'obsidian-web-layout': { install: true, enabled: true },
+      'dataview': { install: true, enabled: true }
     },
     layout: { default: 'auto', threshold: 900 },
     demoVault: { enabled: true, id: '0000demo0000demo' },

@@ -40,27 +40,49 @@ previous server-side in-memory vault store (internally named `VaultDO`) has been
     production, deploy behind a **custom domain/route**: uncomment `routes` in
     `wrangler.toml`.
 
-## System plugins — layout-switcher (enabled) + LiveSync (installed, disabled)
-`build-assets.sh` builds `public/system-plugins/manifest.json` with **two**
-entries, served statically (CF static hosting has no `/api/system-plugins` —
-`seed-system-plugins.js` falls back to fetching this file when the API route
-404s):
-- **`obsidian-web-layout`** (`enabled:true`) — the desktop/mobile layout
-  switcher, active by default.
+## System plugins — layout-switcher + LiveSync (disabled) + Dataview (enabled)
+`build-assets.sh` builds `public/system-plugins/manifest.json` from
+`src/config/deploy-config.json`'s `plugins` map — one entry per plugin, no
+hardcoded per-plugin shell logic (see `build-system-plugins.js`, which does
+the actual work: it loops over that config, so adding a fourth plugin means
+one JSON entry, not a code change). Served statically because CF static
+hosting has no `/api/system-plugins` — `seed-system-plugins.js` falls back
+to fetching this file when the API route 404s. Currently three entries:
+- **`obsidian-web-layout`** (`enabled:true`, first-party — lives in
+  `src/plugins/obsidian-web-layout/`, just copied) — the desktop/mobile
+  layout switcher, active by default.
 - **`obsidian-livesync`** (`enabled:false`) — [Self-hosted
-  LiveSync](https://github.com/vrtmrz/obsidian-livesync), downloaded at build
-  time by `node scripts/install-livesync.js` (from the plugin's GitHub
-  releases into `vendor/plugins/obsidian-livesync/`, cached under
-  `.tmp/cache/livesync-releases/`) and copied into `public/system-plugins/`.
-  It ships **installed but disabled** — the files land in every new vault's
-  `.obsidian/plugins/obsidian-livesync/` on first visit, but `enabled:false`
-  means `seed-system-plugins.js` does **not** add it to
-  `.obsidian/community-plugins.json`, so it never auto-runs. The user enables
-  it manually (Settings → Community plugins → toggle), then configures a
-  CouchDB endpoint in the LiveSync settings tab. Pin a specific release with
-  `SEED_LIVESYNC_VERSION=<tag>` before running the build; if the download
-  fails (offline, GitHub outage), the build **warns and continues** with
-  layout-switcher only — never hard-fails on a missing third-party download.
+  LiveSync](https://github.com/vrtmrz/obsidian-livesync), MIT-licensed.
+- **`dataview`** (`enabled:true`) — [Dataview](https://github.com/blacksmithgu/obsidian-dataview),
+  MIT-licensed. Backs the demo's "Dataview Queries" note — without this, the
+  ` ```dataview ` blocks in that note render as plain code, not live queries.
+
+The latter two are **downloaded from GitHub at build time** (`node
+scripts/install-plugin.js --repo <owner/name> --dest <id>`, called once per
+plugin by `build-system-plugins.js`) into `vendor/plugins/<id>/`, cached
+under `.tmp/cache/<id>-releases/`, and copied into `public/system-plugins/`
+— **including their `LICENSE` file**, both in the public build output and in
+every vault they get seeded into (MIT requires the license notice to travel
+with the code, not just be mentioned in a doc). `obsidian-livesync` ships
+**installed but disabled** — the files land in every new vault's
+`.obsidian/plugins/obsidian-livesync/` on first visit, but `enabled:false`
+means `seed-system-plugins.js` does **not** add it to
+`.obsidian/community-plugins.json`, so it never auto-runs; the user enables
+it manually (Settings → Community plugins → toggle), then configures a
+CouchDB endpoint in the LiveSync settings tab. `dataview` ships **installed
+and enabled** — it *is* added to `community-plugins.json` on seed, so it
+runs immediately in the demo vault. Pin a specific release with
+`SEED_LIVESYNC_VERSION=<tag>` / `SEED_DATAVIEW_VERSION=<tag>` (per
+`deploy-config.json`'s `versionEnv` field) before running the build; if a
+download fails (offline, GitHub outage), the build **warns and continues**
+without that one plugin — it never hard-fails the whole build on a missing
+third-party download.
+
+All of these plugins come from **Obsidian's community plugin list** —
+downloaded from GitHub, the same way installing a community plugin from
+inside Obsidian itself does (that in-app install path is what
+`POST /api/proxy-request` exists for, see above: browsers can't fetch
+GitHub/obsidian.md directly due to missing CORS headers).
 
 ## Example / demo vault content (`template.js`) — wired, not a stub
 `template.js` holds the **demo vault** — 11 example files (`Welcome.md`,
@@ -86,6 +108,9 @@ delete `template.js`.
   `obsidian-livesync` ships in every new vault's `.obsidian/plugins/`, off by
   default; the user opts in via Settings → Community plugins. See "System
   plugins" above.
+- **Dataview preinstalled, enabled** (`demo-and-docs-truth` §3.5-a) — the
+  demo vault's "Dataview Queries" note runs live queries out of the box.
+  See "System plugins" above.
 - Native "**Create a vault**" button (mobile onboarding UI) works end-to-end:
   it used to call `Filesystem.mkdir()` and hit the non-existent `/api/fs/mkdir`
   here (always failing with "mkdir failed: ..."), since `window.__owVaultType`

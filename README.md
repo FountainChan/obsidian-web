@@ -199,9 +199,9 @@ npm run build   # scripts/build-assets.sh → .tmp/deployments/cloudflare/public
 npm run dev     # local emulation (wrangler dev) — does NOT publish anywhere
 ```
 
-`npm run build` needs network access (GitHub API + release-asset CDN) to fetch the LiveSync
-plugin on a cold cache; if unreachable, it **warns and continues** without LiveSync rather than
-failing the build.
+`npm run build` needs network access (GitHub API + release-asset CDN) to fetch the LiveSync and
+Dataview community plugins on a cold cache; if unreachable, it **warns and continues** without
+whichever plugin failed to download, rather than failing the build.
 
 `npm run deploy` (build, then `wrangler deploy`) publishes to the real Cloudflare account
 configured in `wrangler.toml` — only run it when you actually intend to publish; use `npm run dev`

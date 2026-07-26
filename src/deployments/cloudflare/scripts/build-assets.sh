@@ -120,60 +120,20 @@ echo "  installing sw.js (BUILD_ID=${BUST})..."
 cp "$MAIN_DIR/src/client-mobile/sw.js" "$PUBLIC_DIR/sw.js"
 sed -i "s/__OW_BUILD__/${BUST}/g" "$PUBLIC_DIR/sw.js"   # BUST = ה-timestamp שכבר משמש ל-?v=
 
-# ── system plugins (layout-switcher + LiveSync) → static (docs/plans/cf-mobile-seed.md §3א, cf-preinstall-livesync §3) ──
+# ── system plugins → static (docs/plans/cf-mobile-seed.md §3א,
+# cf-preinstall-livesync §3, demo-and-docs-truth §3.5-a) ──────────────────
 # CF static hosting has no /api/system-plugins — seed-system-plugins.js falls
 # back to fetching these static files when the API route 404s.
-echo "  building system-plugins/ (static)..."
-
-# config.plugins.*.install/enabled (docs/plans/deploy-config.md §3ג) — `install`
-# gates whether the plugin ships at all (files + manifest entry); `enabled`
-# becomes the manifest's `enabled` flag, which seed-system-plugins.js reads to
-# decide installed-but-disabled vs auto-enabled-on-seed. Defaults in
-# src/config/deploy-config.json mirror the old hardcoded values 1:1 (install:
-# true/true, enabled: false/true) — zero regression when the file is unchanged.
-LAYOUT_INSTALL=$(node -p "require('$CONFIG_PATH').plugins['obsidian-web-layout'].install")
-LAYOUT_ENABLED=$(node -p "require('$CONFIG_PATH').plugins['obsidian-web-layout'].enabled")
-LS_INSTALL=$(node -p "require('$CONFIG_PATH').plugins['obsidian-livesync'].install")
-LS_ENABLED=$(node -p "require('$CONFIG_PATH').plugins['obsidian-livesync'].enabled")
-
-# system-plugins/ — layout-switcher, gated by config.plugins.obsidian-web-layout.install
-LAYOUT_VER=""
-if [[ "$LAYOUT_INSTALL" == "true" ]]; then
-  mkdir -p "$PUBLIC_DIR/system-plugins/obsidian-web-layout"
-  cp "$MAIN_DIR/src/plugins/obsidian-web-layout/"* "$PUBLIC_DIR/system-plugins/obsidian-web-layout/"
-  LAYOUT_VER=$(node -p "require('$MAIN_DIR/src/plugins/obsidian-web-layout/manifest.json').version")
-else
-  echo "  config: plugins.obsidian-web-layout.install=false — skipping layout-switcher"
-fi
-
-# LiveSync — gated by config.plugins.obsidian-livesync.install. finding 1: `if node ...; then` בולע exit(1) → set -e לא מפיל.
-LS_PIN="${SEED_LIVESYNC_VERSION:-}"      # ריק=latest; נעילת-גרסה אופציונלית
-LS_VERSION=""; LS_FILES=""              # finding 3: init לפני set -u
-if [[ "$LS_INSTALL" == "true" ]]; then
-  if node "$MAIN_DIR/scripts/install-livesync.js" ${LS_PIN:+--version "$LS_PIN"}; then
-    LS_SRC="$MAIN_DIR/vendor/plugins/obsidian-livesync"
-    if [[ -f "$LS_SRC/main.js" && -f "$LS_SRC/manifest.json" ]]; then
-      DEST="$PUBLIC_DIR/system-plugins/obsidian-livesync"; mkdir -p "$DEST"
-      cp "$LS_SRC/main.js" "$LS_SRC/manifest.json" "$DEST/"          # finding 4: מפורש, לא *.json (מדלג data.json)
-      LS_FILES='["main.js","manifest.json"]'
-      if [[ -f "$LS_SRC/styles.css" ]]; then cp "$LS_SRC/styles.css" "$DEST/"; LS_FILES='["main.js","manifest.json","styles.css"]'; fi
-      LS_VERSION=$(node -p "require('$LS_SRC/manifest.json').version")
-    fi
-  else
-    echo "  WARN: obsidian-livesync download failed — skipping preinstall (build continues, layout-switcher only)"
-  fi
-else
-  echo "  config: plugins.obsidian-livesync.install=false — skipping LiveSync"
-fi
-
-# manifest.json — finding 2: env מיוצא inline לפני node -e (אחרת process.env undefined → abort)
-LAYOUT_VER="$LAYOUT_VER" LAYOUT_ENABLED="$LAYOUT_ENABLED" LS_VERSION="$LS_VERSION" LS_FILES="$LS_FILES" LS_ENABLED="$LS_ENABLED" OUT="$PUBLIC_DIR/system-plugins/manifest.json" node -e '
-  const fs=require("fs");
-  const plugins=[];
-  if (process.env.LAYOUT_VER) plugins.push({id:"obsidian-web-layout",version:process.env.LAYOUT_VER,files:["main.js","manifest.json"],enabled:process.env.LAYOUT_ENABLED === "true"});
-  if (process.env.LS_VERSION) plugins.push({id:"obsidian-livesync",version:process.env.LS_VERSION,files:JSON.parse(process.env.LS_FILES),enabled:process.env.LS_ENABLED === "true"});
-  fs.writeFileSync(process.env.OUT, JSON.stringify({plugins}));
-'
+#
+# One entry in src/config/deploy-config.json's `plugins` map per plugin —
+# NOT a hardcoded shell-variable block per plugin (that pattern is exactly
+# what broke down the moment a second/third plugin (LiveSync, then Dataview)
+# needed the same treatment: see build-system-plugins.js header comment).
+# `install` gates whether the plugin ships at all; `enabled` becomes the
+# manifest's `enabled` flag (seed-system-plugins.js reads it to decide
+# installed-but-disabled vs auto-enabled-on-seed).
+echo "  building system-plugins/ (static, config-driven)..."
+node "$SCRIPT_DIR/build-system-plugins.js" "$CONFIG_PATH" "$MAIN_DIR" "$PUBLIC_DIR"
 
 # ── example vault content → static JSON (docs/plans/cf-mobile-seed.md §3א) ──
 # template.js (cf/) exports TEMPLATE_FILES but imports plugins-generated.js,

@@ -21,6 +21,8 @@ test('DEFAULTS mirrors src/config/deploy-config.json — today\'s hardcoded beha
   assert.equal(DEFAULTS.plugins['obsidian-livesync'].enabled, false);
   assert.equal(DEFAULTS.plugins['obsidian-web-layout'].install, true);
   assert.equal(DEFAULTS.plugins['obsidian-web-layout'].enabled, true);
+  assert.equal(DEFAULTS.plugins['dataview'].install, true);
+  assert.equal(DEFAULTS.plugins['dataview'].enabled, true);
   assert.equal(DEFAULTS.defaultVaultLocation, 'device');
 });
 

@@ -2,33 +2,27 @@
 'use strict';
 
 /**
- * install-livesync.js
+ * install-dataview.js
  *
- * Downloads the obsidian-livesync plugin from GitHub releases and installs
- * it into vendor/plugins/obsidian-livesync/ (+ its LICENSE — MIT).
+ * Downloads the Dataview community plugin (blacksmithgu/obsidian-dataview,
+ * MIT-licensed) from GitHub releases and installs it into
+ * vendor/plugins/dataview/ (+ its LICENSE — see scripts/install-plugin.js).
  *
  * Thin per-plugin wrapper around the generic scripts/install-plugin.js
- * engine — kept as its own file (rather than folded away) so the CLI
- * command and `SEED_LIVESYNC_VERSION` env var documented in
- * src/deployments/cloudflare/README.md keep working unchanged.
- *
- * After running this script, the system-plugins overlay will serve
- * the plugin automatically to any vault opened via obsidian-web.
+ * engine — see install-livesync.js for the sibling wrapper (same shape).
  *
  * Usage:
- *   node scripts/install-livesync.js
- *   node scripts/install-livesync.js --version v0.23.8
- *   node scripts/install-livesync.js --force
+ *   node scripts/install-dataview.js
+ *   node scripts/install-dataview.js --version 0.5.70
+ *   node scripts/install-dataview.js --force
  */
 
 const { installPlugin } = require('./install-plugin');
 
-const REPO = 'vrtmrz/obsidian-livesync';
-const DEST = 'obsidian-livesync';
+const REPO = 'blacksmithgu/obsidian-dataview';
+const DEST = 'dataview';
 
 function parseArgs(argv) {
-  // Same flag surface as before (--version/--force/--help), no --repo/--dest
-  // — those are fixed for this wrapper.
   const opts = { version: null, force: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -53,31 +47,20 @@ async function main() {
 
   if (opts.help) {
     console.log([
-      'Usage: node scripts/install-livesync.js [options]',
+      'Usage: node scripts/install-dataview.js [options]',
       '',
-      'Downloads obsidian-livesync from GitHub and installs it into',
-      'vendor/plugins/obsidian-livesync/.',
+      'Downloads Dataview from GitHub and installs it into',
+      'vendor/plugins/dataview/.',
       '',
       'Options:',
-      '  --version <tag>  Specific version tag, e.g. v0.23.8 (default: latest)',
+      '  --version <tag>  Specific version tag, e.g. 0.5.70 (default: latest)',
       '  --force          Re-download even if files are cached; overwrite data.json',
       '  -h, --help       Show this help',
     ].join('\n'));
     return;
   }
 
-  await installPlugin({
-    repo: REPO,
-    dest: DEST,
-    version: opts.version,
-    force: opts.force,
-    // LiveSync-specific data.json defaults (unrelated to the generic
-    // installer): remote_type + a pointer to where to configure it.
-    extraData: {
-      remote_type: 'couchdb',
-      _obsidian_web_note: 'Configure your CouchDB URI in the LiveSync settings tab.',
-    },
-  });
+  await installPlugin({ repo: REPO, dest: DEST, version: opts.version, force: opts.force });
   console.log('Restart the obsidian-web server for the plugin to become available.');
 }
 

@@ -2,8 +2,15 @@
   "defaultVaultLocation": "device",
   "seedExampleContent": true,
   "plugins": {
-    "obsidian-livesync": { "install": true, "enabled": false },
-    "obsidian-web-layout": { "install": true, "enabled": true }
+    "obsidian-livesync": {
+      "install": true, "enabled": false,
+      "source": "github", "repo": "vrtmrz/obsidian-livesync", "versionEnv": "SEED_LIVESYNC_VERSION"
+    },
+    "obsidian-web-layout": { "install": true, "enabled": true, "source": "first-party" },
+    "dataview": {
+      "install": true, "enabled": true,
+      "source": "github", "repo": "blacksmithgu/obsidian-dataview", "versionEnv": "SEED_DATAVIEW_VERSION"
+    }
   },
   "layout": { "default": "auto", "threshold": 900 },
   "demoVault": { "enabled": true, "id": "0000demo0000demo" },

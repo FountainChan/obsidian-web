@@ -52,9 +52,27 @@ test('build-assets.sh: plugins install/enabled follow config.json + index.html g
   if (config.plugins['obsidian-livesync'].install) {
     if (liveSyncEntry) {
       expect(liveSyncEntry.enabled).toBe(config.plugins['obsidian-livesync'].enabled);
+      // MIT attribution (demo-and-docs-truth §3.5-a point 3): the license
+      // must travel with the shipped plugin files, not just be documented.
+      expect(liveSyncEntry.files).toContain('LICENSE');
+      expect(fs.existsSync(path.join(PUBLIC_DIR, 'system-plugins', 'obsidian-livesync', 'LICENSE'))).toBe(true);
     } // else: network unavailable in this environment — build.sh already WARNs and continues, nothing more to assert.
   } else {
     expect(liveSyncEntry).toBeUndefined();
+  }
+
+  // ── Dataview: same config-driven/network-soft pattern as LiveSync above.
+  // Added in demo-and-docs-truth §3.5-a — the demo's "Dataview Queries.md"
+  // claims the plugin is installed and active; this is what makes that true.
+  const dataviewEntry = manifest.plugins.find((p) => p.id === 'dataview');
+  if (config.plugins.dataview.install) {
+    if (dataviewEntry) {
+      expect(dataviewEntry.enabled).toBe(config.plugins.dataview.enabled);
+      expect(dataviewEntry.files).toContain('LICENSE');
+      expect(fs.existsSync(path.join(PUBLIC_DIR, 'system-plugins', 'dataview', 'LICENSE'))).toBe(true);
+    } // else: network unavailable — build.sh WARNs and continues, nothing more to assert.
+  } else {
+    expect(dataviewEntry).toBeUndefined();
   }
 
   // ── window.__owConfigInjected: marker replaced, positioned before the
