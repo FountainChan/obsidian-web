@@ -11,7 +11,10 @@
 // Run: bun test src/deployments/cloudflare/test/proxy-worker.test.js
 
 import { expect, test, describe, beforeEach } from 'bun:test';
-import { handleProxy, isAllowed, isCacheableHost, bytesToB64, b64ToBytes, __resetRateLimit } from '../proxy-worker.js';
+import {
+  handleProxy, isAllowed, isCacheableHost, bytesToB64, b64ToBytes,
+  __resetRateLimit, __setRateLimitMaxEntriesForTest, __getRateLimitMapSizeForTest,
+} from '../proxy-worker.js';
 
 // ── caches.default mock (DoD#4) ──────────────────────────────────────────────
 // Bun has no global `caches` (that's a Worker/Service-Worker runtime API) —
@@ -404,4 +407,56 @@ describe('rate limiting (§3.3)', () => {
     }), makeCtx());
     expect(res.status).toBe(200);
   }, 20000);
+
+  // ── §3.5ה (calev PARTIAL, ממצא 5 — DoD#16) ────────────────────────────────
+  // rateLimitMap used to grow without bound: a scan across distinct IPs left
+  // one permanent entry per IP, never pruned. These exercise the cap/prune
+  // logic directly with a small max-entries value (rather than pushing the
+  // real 10,000-entry production cap through handleProxy on every test run)
+  // and a fake clock for the window-expiry case — same technique calev used
+  // to drive the probe by hand.
+
+  test('DoD#16: the tracked-IP map is capped — distinct IPs beyond the cap evict rather than grow forever', async () => {
+    __setRateLimitMaxEntriesForTest(5);
+    try {
+      for (let i = 0; i < 8; i++) {
+        await handleProxy(postRequestFromIp('50.0.0.' + i, { url: 'https://evil.com/x' }), makeCtx());
+      }
+      expect(__getRateLimitMapSizeForTest()).toBeLessThanOrEqual(5);
+    } finally {
+      __setRateLimitMaxEntriesForTest(10000);
+    }
+  });
+
+  test('DoD#16: pruning drops expired entries at the cap instead of evicting still-live ones', async () => {
+    __setRateLimitMaxEntriesForTest(3);
+    const origNow = Date.now;
+    try {
+      let t = 1_000_000;
+      Date.now = () => t;
+      await handleProxy(postRequestFromIp('60.0.0.1', { url: 'https://evil.com/x' }), makeCtx());
+      await handleProxy(postRequestFromIp('60.0.0.2', { url: 'https://evil.com/x' }), makeCtx());
+      await handleProxy(postRequestFromIp('60.0.0.3', { url: 'https://evil.com/x' }), makeCtx());
+      expect(__getRateLimitMapSizeForTest()).toBe(3);
+
+      t += 61_000;   // past the fixed 60s window — all three entries above are now expired
+      await handleProxy(postRequestFromIp('60.0.0.4', { url: 'https://evil.com/x' }), makeCtx());
+      // Hitting the cap with the new IP prunes the three expired entries
+      // first, then inserts — net result is 1 entry, not "3 kept, oldest
+      // live one evicted".
+      expect(__getRateLimitMapSizeForTest()).toBe(1);
+    } finally {
+      Date.now = origNow;
+      __setRateLimitMaxEntriesForTest(10000);
+    }
+  });
+
+  test('DoD#16: a 429 response carries Retry-After', async () => {
+    let last;
+    for (let i = 0; i < 31; i++) {
+      last = await handleProxy(postRequestFromIp('70.0.0.1', { url: 'https://evil.com/x' }), makeCtx());
+    }
+    expect(last.status).toBe(429);
+    expect(last.headers.get('Retry-After')).toBe('60');
+  });
 });

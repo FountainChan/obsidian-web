@@ -73,10 +73,10 @@ export function b64ToBytes(b64) {
   return bytes;
 }
 
-function json(obj, status = 200) {
+function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
   });
 }
 
@@ -113,6 +113,16 @@ export function isCacheableHost(urlStr) {
 // per the user's own framing ("enough against abuse, not a hard quota").
 const RATE_LIMIT_PER_MINUTE = 30;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+// §3.5ה (calev PARTIAL, ממצא 5 — DoD#16): hard cap on the number of distinct
+// IPs tracked at once. Without one, the Map grows without bound — a scan
+// across N distinct IPs leaves N live entries forever if they never come
+// back (verified: 5000 distinct IPs through one isolate, all retained).
+// Each entry is tiny, so this is a slow-burn, not an exploit, but it's
+// unbounded state in a component whose whole selling point is being
+// state-free, and isolates have a hard memory ceiling. 10k entries is
+// generous headroom over any realistic per-isolate concurrent-abuser count
+// while still bounding worst-case memory.
+export let RATE_LIMIT_MAX_ENTRIES = 10000;
 let rateLimitMap = new Map();
 
 // Exposed for tests only: a module-level Map persists across every test case
@@ -120,6 +130,26 @@ let rateLimitMap = new Map();
 // each other (brief §3.3 finding). Call from beforeEach.
 export function __resetRateLimit() {
   rateLimitMap = new Map();
+}
+
+// Test-only: lets §3.5ה's cap/prune tests exercise the eviction path without
+// pushing 10k+ real requests through handleProxy on every run.
+export function __setRateLimitMaxEntriesForTest(n) {
+  RATE_LIMIT_MAX_ENTRIES = n;
+}
+
+export function __getRateLimitMapSizeForTest() {
+  return rateLimitMap.size;
+}
+
+// Drops entries whose window has already fully expired — called
+// opportunistically (not on every request; a Map.size check is O(1), a full
+// sweep is O(n)) so long-running isolates don't accumulate one entry per
+// distinct IP ever seen, only per IP active within the last window.
+function pruneExpiredRateLimitEntries(now) {
+  for (const [key, entry] of rateLimitMap) {
+    if (now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) rateLimitMap.delete(key);
+  }
 }
 
 // Missing CF-Connecting-IP bypasses the limiter entirely — in production
@@ -131,6 +161,17 @@ function checkRateLimit(ip) {
   const now = Date.now();
   const entry = rateLimitMap.get(ip);
   if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    if (rateLimitMap.size >= RATE_LIMIT_MAX_ENTRIES) {
+      pruneExpiredRateLimitEntries(now);
+      // Still at/over the cap after pruning (every tracked IP is genuinely
+      // active within the current window) — evict the oldest entry rather
+      // than let the map grow further. Map iteration order is insertion
+      // order, so keys().next() is the oldest surviving entry.
+      if (rateLimitMap.size >= RATE_LIMIT_MAX_ENTRIES) {
+        const oldestKey = rateLimitMap.keys().next().value;
+        rateLimitMap.delete(oldestKey);
+      }
+    }
     rateLimitMap.set(ip, { count: 1, windowStart: now });
     return true;
   }
@@ -143,7 +184,14 @@ export async function handleProxy(request, ctx) {
   // abusive client pays no JSON-parse cost either.
   const clientIp = request.headers.get('CF-Connecting-IP');
   if (!checkRateLimit(clientIp)) {
-    return json({ error: 'rate limit exceeded' }, 429);
+    // §3.5ה (DoD#16): tell the client how long to back off instead of
+    // leaving it to guess/hammer — the window is fixed (not sliding), so the
+    // worst case is "wait out the rest of THIS window", i.e. up to
+    // RATE_LIMIT_WINDOW_MS. Not exact (we don't track per-IP remaining time
+    // here), but a same-order-of-magnitude value is far better than none.
+    return json({ error: 'rate limit exceeded' }, 429, {
+      'Retry-After': String(RATE_LIMIT_WINDOW_MS / 1000),
+    });
   }
 
   let payload;

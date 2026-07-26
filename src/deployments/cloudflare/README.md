@@ -115,7 +115,14 @@ delete `template.js`.
    isolates/IPs isn't meaningfully throttled. Moving to KV/Durable Objects
    would fix this but needs an account-level binding (out of scope for a
    code-only slice); the current approach is deliberately "enough against
-   gross abuse," not a hard guarantee.
+   gross abuse," not a hard guarantee. The per-isolate counter map is capped
+   at 10,000 distinct IPs (oldest entry evicted past the cap) and prunes
+   expired entries opportunistically, so a burst of distinct attacker IPs
+   can't grow it without bound within one isolate's lifetime — this bounds
+   memory, it does not make the limiter precise. The window is fixed
+   (not sliding), so a client can legitimately send close to double the
+   per-minute limit across a window boundary; a `429` response includes
+   `Retry-After: 60` either way.
 2. Two font files referenced by `obsidian-mobile/app.css` ("Inter",
    `public/fonts/*.woff2`) 404 — `vendor/obsidian-mobile` never included a
    `public/` dir. Cosmetic only (`font-display: swap` → system font fallback);
