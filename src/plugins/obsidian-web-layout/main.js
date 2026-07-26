@@ -14,12 +14,26 @@
  *
  * In real Obsidian (desktop or mobile app) window.__owPlatform does not
  * exist, so this plugin loads as a no-op — no ribbon icon, no commands.
+ *
+ * docs/plans/runtime-platform-descriptors.md §3.5: `localStorage.EmulateMobile`
+ * overrides window.__owPlatformOverrides in platform-bridge.js, so this
+ * switcher would be a no-op while emulating (isMobile is locked true either
+ * way). Rather than leave a button that looks active but does nothing —
+ * worse than a disabled button (brief §3.5's explicit call) — it's shown
+ * visually disabled and its commands/ribbon click are inert while emulating.
  */
 
 const obsidian = require('obsidian');
 
 const LAYOUT_KEY = 'obsidian-web:layout-mode';
+const EMULATE_MOBILE_KEY = 'EmulateMobile';
 const MODES = ['auto', 'mobile', 'desktop'];
+
+function isEmulateMobileActive() {
+  // Truthy VALUE, not mere key existence — mirrors the bundle's own guard
+  // and platform-bridge.js's computeWant() (brief §3.5).
+  return !!localStorage.getItem(EMULATE_MOBILE_KEY);
+}
 
 function getMode() {
   return localStorage.getItem(LAYOUT_KEY) || 'auto';
@@ -67,13 +81,41 @@ module.exports = class ObsidianWebLayoutPlugin extends obsidian.Plugin {
       return;
     }
 
-    this.addRibbonIcon('monitor-smartphone', 'Layout mode', (evt) => this.showMenu(evt));
+    const emulating = isEmulateMobileActive();
+
+    const ribbonEl = this.addRibbonIcon(
+      'monitor-smartphone',
+      emulating ? 'Layout mode (disabled during mobile emulation)' : 'Layout mode',
+      (evt) => {
+        if (emulating) {
+          new obsidian.Notice('Layout switcher is disabled during mobile emulation.');
+          return;
+        }
+        this.showMenu(evt);
+      }
+    );
+    if (emulating) {
+      ribbonEl.addClass('is-disabled');
+      ribbonEl.setAttribute('aria-disabled', 'true');
+      // .is-disabled alone isn't styled for ribbon actions in the bundle's
+      // own CSS (only menu-items/text-icon-buttons are) — force the visual
+      // unmistakably here rather than rely on an Obsidian rule that doesn't
+      // exist for this element.
+      ribbonEl.style.opacity = '0.35';
+      ribbonEl.style.cursor = 'not-allowed';
+    }
 
     for (const mode of MODES) {
       this.addCommand({
         id: 'set-layout-' + mode,
         name: 'Set layout: ' + modeLabel(mode),
-        callback: () => setMode(mode),
+        callback: () => {
+          if (emulating) {
+            new obsidian.Notice('Layout switcher is disabled during mobile emulation.');
+            return;
+          }
+          setMode(mode);
+        },
       });
     }
   }
