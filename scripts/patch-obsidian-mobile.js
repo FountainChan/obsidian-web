@@ -5,13 +5,22 @@
  * patch-obsidian-mobile.js
  *
  * Applies build-time patches to the extracted Obsidian mobile bundle
- * (obsidian-mobile/app.js) so that:
+ * (obsidian-mobile/app.js).
  *
- *   1. The internal `Platform` object is exposed as `window.__owPlatform`.
- *   2. The entry IIFE merges `window.__owPlatformOverrides` into the
- *      Platform flags via `Object.assign`, so callers can override defaults.
- *   3. The body `is-mobile` class is gated on the post-override `isMobile`
- *      flag instead of being added unconditionally.
+ * As of docs/plans/runtime-platform-descriptors.md, this is down to ONE
+ * documented patch (`vault-profile-on-desktop-layout`). The three patches
+ * that used to expose `window.__owPlatform`, merge
+ * `window.__owPlatformOverrides` into the Platform flags, and gate the
+ * `is-mobile` body class were replaced by a runtime interceptor —
+ * `src/client-mobile/platform-bridge.js` — that achieves the same effect by
+ * wrapping `Object.defineProperty` instead of rewriting app.js. See that
+ * brief for the full rationale (§0-§1) and the removed patches' history.
+ *
+ * The one patch that remains here is a genuine bundle edit with no runtime
+ * equivalent yet: it makes the desktop-layout vault-profile panel render on
+ * a code path that upstream mobile always guards off. Removing it is
+ * blocked on a separate slice (our own vault-profile panel) — see this
+ * patch's own doc block below.
  *
  * Importable:
  *   const { applyPatches, PATCHES } = require('./patch-obsidian-mobile');
@@ -48,51 +57,6 @@ const fsp = require('fs/promises');
 const path = require('path');
 
 const PATCHES = [
-  {
-    // WHAT: Obsidian defines its `Platform` singleton as an object literal
-    //   `{isDesktop:!1,isMobile:!1,isDesktopApp:!1,...}` assigned to a short var.
-    //   We alias that var to `window.__owPlatform` so boot.js and the other
-    //   patches below can read/gate on the live Platform flags from outside.
-    // ANCHOR: search app.js for  isDesktop:!1,isMobile:!1,isDesktopApp:!1
-    //   (the start of the Platform object literal — unique & stable). The
-    //   `var X=` immediately before it is the assignment we hook.
-    // REBUILD: keep the literal prefix verbatim; `\w{1,3}` matches the minified
-    //   var name — widen it only if the name grows past 3 chars. `replace`
-    //   just injects `window.__owPlatform=` after `var X=`.
-    name: 'expose-platform',
-    find:    /var (\w{1,3})=\{isDesktop:!1,isMobile:!1,isDesktopApp:!1/,
-    replace: 'var $1=window.__owPlatform={isDesktop:!1,isMobile:!1,isDesktopApp:!1',
-    expectedMatches: 1,
-  },
-  {
-    // WHAT: at boot the entry IIFE sets the platform flags from runtime
-    //   detection — `X.isMobileApp=!0,X.isMobile=!0,X.isAndroidApp=Dv,X.isIosApp=Tv,`.
-    //   We wrap that run of assignments in `Object.assign(X,{...},window.__owPlatformOverrides||{})`
-    //   so boot.js can override them (force desktop layout, block desktop-only
-    //   plugins, etc.) — this is THE hook the whole platform-override system rides on.
-    // ANCHOR: search app.js for  .isMobileApp=!0   (then confirm the following
-    //   `.isMobile=!0,.isAndroidApp=<expr>,.isIosApp=<expr>,` run on the SAME var).
-    // REBUILD: $1=the platform var, $2=the isAndroidApp expression, $3=the
-    //   isIosApp expression. If Obsidian adds/removes/reorders a flag in this
-    //   run, mirror the new order in BOTH `find` and the Object.assign literal.
-    name: 'iife-overrides',
-    find:    /(\w+)\.isMobileApp=!0,\1\.isMobile=!0,\1\.isAndroidApp=(\w+),\1\.isIosApp=(\w+),/,
-    replace: 'Object.assign($1,{isMobileApp:!0,isMobile:!0,isAndroidApp:$2,isIosApp:$3},window.__owPlatformOverrides||{}),',
-    expectedMatches: 1,
-  },
-  {
-    // WHAT: the bundle unconditionally does `document.body.addClass("is-mobile")`.
-    //   In desktop-layout mode (isMobile overridden to false) that class must
-    //   NOT be added — it drives mobile-only CSS. We gate it on the live flag.
-    // ANCHOR: search app.js for  addClass("is-mobile")   (stable string literal).
-    // REBUILD: prefix the matched call with `window.__owPlatform.isMobile&&`.
-    //   If the surrounding punctuation changes (e.g. `;` instead of `,`), adjust
-    //   the trailing char in `find` and `replace` to match.
-    name: 'is-mobile-class',
-    find:    /document\.body\.addClass\("is-mobile"\),/,
-    replace: 'window.__owPlatform.isMobile&&document.body.addClass("is-mobile"),',
-    expectedMatches: 1,
-  },
   {
     // The "vault profile" panel at the bottom of the left sidebar — contains
     // help icon, settings icon, and the current-vault dropdown. The mobile
