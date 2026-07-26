@@ -31,11 +31,16 @@
 const fs  = require('fs');
 const fsp = require('fs/promises');
 const https = require('https');
+const http = require('http');
 const path = require('path');
 const { pipeline } = require('stream/promises');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const GITHUB_REPOS = 'https://api.github.com/repos';
+// Overridable so tests can point this at a local fixture server instead of
+// the real GitHub API (demo-and-docs-truth §3.8ג: de-networking the
+// cloudflare test suite — see test/fixtures/mock-github-server.js). Not
+// meant to be set in normal use; the default is always the real API.
+const GITHUB_REPOS = process.env.OW_GITHUB_API_BASE || 'https://api.github.com/repos';
 const USER_AGENT   = 'obsidian-web-installer';
 
 // Required assets that must be present in the release. fail loud if missing.
@@ -92,7 +97,11 @@ async function withRetries(label, fn, attempts = 3) {
 
 function request(url, { json = false } = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
+    // Real GitHub is always https:; a local test fixture server (see
+    // OW_GITHUB_API_BASE above) is plain http: — pick the matching module
+    // rather than assuming https: like production always uses.
+    const transport = url.startsWith('http://') ? http : https;
+    const req = transport.get(url, {
       headers: {
         Accept: json ? 'application/vnd.github+json' : 'application/octet-stream',
         'User-Agent': USER_AGENT,

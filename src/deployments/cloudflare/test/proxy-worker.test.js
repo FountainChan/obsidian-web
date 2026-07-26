@@ -5,8 +5,17 @@
 // dev/docs/walkthrough.md:840 "אין לנו CF deploy מקומי"). Bun implements
 // fetch/Request/Response/btoa/atob/URL to the same spec as workerd, so
 // `handleProxy`/`isAllowed`/`bytesToB64`/`b64ToBytes` run as-is (no source
-// changes) under `bun test`, against the REAL network (GitHub/obsidian.md — no mocking of
-// the outbound fetch itself). See brief §0 "Testing strategy — מעודכן".
+// changes) under `bun test`.
+//
+// demo-and-docs-truth §3.8ג: this suite used to exercise the outbound fetch
+// against the REAL network (GitHub/obsidian.md, no mocking) — "a test that
+// fails without network protects nothing" was measured true here: 4 of these
+// tests were among the 5 failures under `unshare -rn`. Every test below now
+// stubs `globalThis.fetch` with a canned Response for the exact URL it needs
+// (restoring the real `fetch` afterwards) instead of calling out — the
+// allow-list/redirect/cache/SSRF logic under test all lives in handleProxy()
+// itself, not in what's on the other end of the wire, so a synthetic
+// response exercises the same code paths deterministically.
 //
 // Run: bun test src/deployments/cloudflare/test/proxy-worker.test.js
 
@@ -128,35 +137,60 @@ describe('bytesToB64 / b64ToBytes', () => {
 
 describe('handleProxy — real network', () => {
   test('DoD#1: raw.githubusercontent.com manifest → 200, base64 body decodes to JSON', async () => {
-    const req = postRequest({
-      url: 'https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json',
-      method: 'GET',
-    });
-    const res = await handleProxy(req, makeCtx());
-    expect(res.status).toBe(200);
-    const payload = await res.json();
-    expect(payload.status).toBe(200);
-    expect(typeof payload.body).toBe('string');
-    const decoded = new TextDecoder().decode(b64ToBytes(payload.body));
-    const parsed = JSON.parse(decoded);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed.length).toBeGreaterThan(0);
-  }, 20000);
+    const url = 'https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json';
+    const fakeManifest = JSON.stringify([{ id: 'dataview' }, { id: 'obsidian-livesync' }]);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (u) => {
+      expect(u.toString()).toBe(url);
+      return new Response(fakeManifest, { status: 200 });
+    };
+    try {
+      const req = postRequest({ url, method: 'GET' });
+      const res = await handleProxy(req, makeCtx());
+      expect(res.status).toBe(200);
+      const payload = await res.json();
+      expect(payload.status).toBe(200);
+      expect(typeof payload.body).toBe('string');
+      const decoded = new TextDecoder().decode(b64ToBytes(payload.body));
+      const parsed = JSON.parse(decoded);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 
   test('DoD#2: release-asset (302 → githubusercontent CDN) is followed', async () => {
-    const req = postRequest({
-      url: 'https://github.com/obsidianmd/obsidian-releases/releases/download/v1.4.16/obsidian-1.4.16.asar.gz',
-      method: 'GET',
-    });
-    const res = await handleProxy(req, makeCtx());
-    expect(res.status).toBe(200);
-    const payload = await res.json();
-    // Followed the redirect to release-assets.githubusercontent.com (or
-    // similar CDN host) and got the actual asset back, not the 302 itself.
-    expect(payload.status).toBe(200);
-    expect(typeof payload.body).toBe('string');
-    expect(payload.body.length).toBeGreaterThan(0);
-  }, 20000);
+    const downloadUrl = 'https://github.com/obsidianmd/obsidian-releases/releases/download/v1.4.16/obsidian-1.4.16.asar.gz';
+    const cdnUrl = 'https://release-assets.githubusercontent.com/mock/obsidian-1.4.16.asar.gz';
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async (u) => {
+      calls++;
+      const urlStr = u.toString();
+      if (urlStr === downloadUrl) {
+        return new Response(null, { status: 302, headers: { location: cdnUrl } });
+      }
+      if (urlStr === cdnUrl) {
+        return new Response(new Uint8Array([1, 2, 3, 4]).buffer, { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    };
+    try {
+      const req = postRequest({ url: downloadUrl, method: 'GET' });
+      const res = await handleProxy(req, makeCtx());
+      expect(res.status).toBe(200);
+      const payload = await res.json();
+      // Followed the redirect to release-assets.githubusercontent.com (or
+      // similar CDN host) and got the actual asset back, not the 302 itself.
+      expect(payload.status).toBe(200);
+      expect(typeof payload.body).toBe('string');
+      expect(payload.body.length).toBeGreaterThan(0);
+      expect(calls).toBe(2); // initial request + the followed redirect
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 
   test('DoD#3: SSRF — disallowed host → 403', async () => {
     const req = postRequest({ url: 'https://evil.com/steal', method: 'GET' });
@@ -176,21 +210,35 @@ describe('handleProxy — real network', () => {
     expect(res.status).toBe(403);
   });
 
-  test('DoD#3: SSRF — real allow-listed host redirecting off-list stays 502-safe (sanity)', async () => {
-    // Sanity check with real GitHub infra: an allow-listed URL that redirects
-    // within the allow-list (release CDN) must NOT be spuriously blocked.
-    // The actual "redirect lands on a disallowed/internal host → 502" branch
-    // is exercised deterministically below (real GitHub won't redirect us to
-    // 169.254.169.254 on demand), by stubbing only the transport (fetch)
-    // while running the real handleProxy/isAllowed redirect-chain logic.
-    const req = postRequest({
-      url: 'https://github.com/obsidianmd/obsidian-releases/releases/download/v1.4.16/obsidian-1.4.16.asar.gz',
-      method: 'GET',
-    });
-    const res = await handleProxy(req, makeCtx());
-    const payload = await res.json();
-    expect(payload.status).not.toBe(502);
-  }, 20000);
+  test('DoD#3: SSRF — allow-listed host redirecting within the allow-list stays 502-safe (sanity)', async () => {
+    // An allow-listed URL that redirects within the allow-list (release CDN)
+    // must NOT be spuriously blocked. The actual "redirect lands on a
+    // disallowed/internal host → 502" branch is exercised deterministically
+    // below, by stubbing only the transport (fetch) while running the real
+    // handleProxy/isAllowed redirect-chain logic — same technique, applied
+    // here to the non-blocked path (previously checked `payload.status`,
+    // which is `undefined` — not `502` — on ANY failure shape, including a
+    // real network outage; that let this test pass for the wrong reason
+    // under `unshare -rn`. Checks the outer `res.status` now instead).
+    const downloadUrl = 'https://github.com/obsidianmd/obsidian-releases/releases/download/v1.4.16/obsidian-1.4.16.asar.gz';
+    const cdnUrl = 'https://release-assets.githubusercontent.com/mock/obsidian-1.4.16.asar.gz';
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (u) => {
+      const urlStr = u.toString();
+      if (urlStr === downloadUrl) return new Response(null, { status: 302, headers: { location: cdnUrl } });
+      if (urlStr === cdnUrl) return new Response(new Uint8Array([9, 9]).buffer, { status: 200 });
+      throw new Error(`unexpected fetch: ${urlStr}`);
+    };
+    try {
+      const req = postRequest({ url: downloadUrl, method: 'GET' });
+      const res = await handleProxy(req, makeCtx());
+      expect(res.status).not.toBe(502);
+      const payload = await res.json();
+      expect(payload.status).not.toBe(502);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 
   test('DoD#3: SSRF — redirect chain landing on internal host → 502 blocked, not followed', async () => {
     // github.com is allow-listed, so the initial request passes isAllowed();
@@ -262,16 +310,19 @@ describe('handleProxy — Cache API (DoD#4)', () => {
     const realFetch = globalThis.fetch;
     globalThis.caches = makeMockCaches();
     let fetchCalls = 0;
-    globalThis.fetch = async (...args) => {
+    globalThis.fetch = async () => {
       fetchCalls++;
-      return realFetch(...args);
+      return new Response(JSON.stringify([{ id: 'dataview' }]), { status: 200 });
     };
     try {
       const url = 'https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json';
 
-      // First call: real network fetch, cache miss, response cached via
-      // ctx.waitUntil (must await it — that's how the Worker runtime keeps
-      // the cache write alive past the response, and how we observe it here).
+      // First call: cache miss, response cached via ctx.waitUntil (must
+      // await it — that's how the Worker runtime keeps the cache write
+      // alive past the response, and how we observe it here). `fetch` is
+      // stubbed (demo-and-docs-truth §3.8ג) — the caching logic under test
+      // lives entirely in handleProxy/caches.default, not in what a real
+      // GitHub response looks like.
       const ctx1 = makeCtx();
       const res1 = await handleProxy(postRequest({ url, method: 'GET' }), ctx1);
       expect(res1.status).toBe(200);
@@ -296,9 +347,9 @@ describe('handleProxy — Cache API (DoD#4)', () => {
     const realFetch = globalThis.fetch;
     globalThis.caches = makeMockCaches();
     let fetchCalls = 0;
-    globalThis.fetch = async (...args) => {
+    globalThis.fetch = async () => {
       fetchCalls++;
-      return realFetch(...args);
+      return new Response(JSON.stringify({ tag_name: 'v1.4.16' }), { status: 200 });
     };
     try {
       const url = 'https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest';

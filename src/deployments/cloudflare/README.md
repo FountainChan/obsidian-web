@@ -134,13 +134,15 @@ delete `template.js`.
    `public/` dir. Cosmetic only (`font-display: swap` → system font fallback);
    does not block rendering. Not a `vendor/obsidian-desktop` dependency (path is under
    `/obsidian-mobile/` already) — just an incomplete upstream extraction.
-3. `/api/proxy-request` is verified via a **Bun integration test** against the
-   real network (manifest fetch, release-asset redirect, SSRF, cache) — not
-   `wrangler dev`, which doesn't produce results in the current dev sandbox
-   (workerd hangs). The one thing that test *can't* cover is an actual
-   community-plugin **install through a running Worker** (browser → `wrangler
-   dev`/deployed Worker → GitHub) — deferred to a real `wrangler deploy` or a
-   CF environment where `workerd` runs.
+3. `/api/proxy-request` is verified via a **Bun integration test**
+   (manifest fetch, release-asset redirect, SSRF, cache) against a stubbed
+   `fetch` (demo-and-docs-truth §3.8ג — de-networked so the whole `test/`
+   suite runs the same offline as online) — not `wrangler dev`, which doesn't
+   produce results in the current dev sandbox (workerd hangs). The one thing
+   that test *can't* cover is an actual community-plugin **install through a
+   running Worker** (browser → `wrangler dev`/deployed Worker → GitHub) —
+   deferred to a real `wrangler deploy` or a CF environment where `workerd`
+   runs.
 
 ## Deploy
 ```

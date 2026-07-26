@@ -5,8 +5,13 @@
 // the deploy-config.js loader tag.
 //
 // Runs the REAL build script against the REAL vendor/obsidian-mobile bundle
-// and the REAL committed config — same pattern as proxy-worker.test.js
-// exercising real network (LiveSync/Dataview download, no mocking).
+// and the REAL committed config, but against a LOCAL mock GitHub server
+// (test/fixtures/mock-github-server.js) instead of the real network —
+// demo-and-docs-truth §3.8ג: the cloudflare package was 21/26 under
+// `unshare -rn` (this test's own happy path was one of the 5 network-bound
+// failures) — "a test that fails without network protects nothing".
+// scripts/install-plugin.js reads OW_GITHUB_API_BASE to redirect its GitHub
+// calls at build time; production is unaffected (env var unset there).
 //
 // demo-and-docs-truth §3.6-ג (calev NO-GO round 3, F4): a GitHub download
 // failure for an `install: true` plugin used to WARN and let the build
@@ -14,14 +19,24 @@
 // while it ships 0 files for it (exactly the Dataview lie this slice exists
 // to kill). build-system-plugins.js now throws instead — an install:true
 // plugin MUST resolve, or the whole build fails loudly. That means this
-// test's happy-path assertions below are no longer "soft": if execSync on
-// line ~40 didn't throw, every install:true plugin in config DID resolve.
+// test's happy-path assertions below are no longer "soft": if the build
+// below didn't throw, every install:true plugin in config DID resolve.
+//
+// Uses async execFile, NOT execSync: the mock GitHub server above runs
+// in-process, and execSync blocks this process's event loop for its whole
+// duration — the server could never accept the build's HTTP requests,
+// deadlocking the child process against its own parent. Async exec keeps
+// the event loop free to service the mock server while the child runs.
 
 import { expect, test } from 'bun:test';
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { startMockGithubServer } from './fixtures/mock-github-server.js';
+
+const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CF_DIR = path.resolve(__dirname, '..');
@@ -29,12 +44,17 @@ const MAIN_DIR = path.resolve(CF_DIR, '..', '..', '..');
 const PUBLIC_DIR = path.join(MAIN_DIR, '.tmp', 'deployments', 'cloudflare', 'public');
 const CONFIG_PATH = path.join(MAIN_DIR, 'src', 'config', 'deploy-config.json');
 
-test('build-assets.sh: plugins install/enabled follow config.json + index.html gets window.__owConfigInjected before deploy-config.js', () => {
-  execSync('bash scripts/build-assets.sh', {
-    cwd: CF_DIR,
-    stdio: 'pipe',
-    timeout: 120000,
-  });
+test('build-assets.sh: plugins install/enabled follow config.json + index.html gets window.__owConfigInjected before deploy-config.js', async () => {
+  const mock = await startMockGithubServer();
+  try {
+    await execFileAsync('bash', ['scripts/build-assets.sh'], {
+      cwd: CF_DIR,
+      timeout: 120000,
+      env: { ...process.env, OW_GITHUB_API_BASE: mock.baseUrl },
+    });
+  } finally {
+    await mock.close();
+  }
 
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const manifest = JSON.parse(fs.readFileSync(path.join(PUBLIC_DIR, 'system-plugins', 'manifest.json'), 'utf8'));
@@ -88,35 +108,35 @@ test('build-assets.sh: plugins install/enabled follow config.json + index.html g
   expect(html.indexOf(expectedSnippet)).toBeLessThan(html.indexOf('src="/client-mobile/deploy-config.js'));
 }, 120000);
 
-test('build-assets.sh: fails loudly (non-zero exit) when an install:true plugin fails to download (demo-and-docs-truth §3.6-ג, F4)', () => {
+test('build-assets.sh: fails loudly (non-zero exit) when an install:true plugin fails to download (demo-and-docs-truth §3.6-ג, F4)', async () => {
+  // Against the mock server, `obsidian-livesync`'s unpinned /latest always
+  // resolves and only `dataview`'s pinned (bad) tag 404s — deterministic,
+  // unlike the real GitHub rate limit this test used to race against (see
+  // the now-removed comment below about assertion flakiness, demo-and-docs-truth
+  // §3.7, calev NO-GO round 3, finding 5 — no longer reachable once neither
+  // plugin depends on a real, shared rate limit).
+  const mock = await startMockGithubServer();
   let threw = false;
   let status;
   let stderr = '';
   try {
-    execSync('bash scripts/build-assets.sh', {
+    await execFileAsync('bash', ['scripts/build-assets.sh'], {
       cwd: CF_DIR,
-      stdio: 'pipe',
       timeout: 120000,
-      env: { ...process.env, SEED_DATAVIEW_VERSION: '99.99.99-does-not-exist' },
+      env: { ...process.env, OW_GITHUB_API_BASE: mock.baseUrl, SEED_DATAVIEW_VERSION: '99.99.99-does-not-exist' },
     });
   } catch (err) {
     threw = true;
-    status = err.status;
+    status = err.code;
     stderr = String(err.stderr || '');
+  } finally {
+    await mock.close();
   }
 
   expect(threw).toBe(true);
   expect(status).not.toBe(0);
-  // build-system-plugins.js's thrown Error names the plugin that failed and
-  // says why — but it must NOT be `dataview` specifically here. Config lists
-  // `obsidian-livesync` before `dataview` (src/config/deploy-config.json),
-  // so under an unrelated GitHub rate limit (real, unauthenticated 60/h),
-  // `obsidian-livesync`'s *unpinned* download can fail first and the build
-  // exits before ever reaching the pinned bad `SEED_DATAVIEW_VERSION` tag
-  // this test forces — the invariant this test guards (any install:true
-  // failure ⇒ non-zero exit) still held, but asserting the specific plugin
-  // name made the test flaky on exactly the failure mode it exists to catch
-  // (demo-and-docs-truth §3.7, calev NO-GO round 3, finding 5). Assert the
-  // shape of the error instead of which plugin triggered it.
+  // Assert the shape of the error, not (necessarily) which plugin triggered
+  // it — kept generic even though it's now deterministic, since asserting
+  // the exact plugin name is not what this test exists to guard.
   expect(stderr).toMatch(/has install=true but the GitHub download failed/);
 }, 120000);
