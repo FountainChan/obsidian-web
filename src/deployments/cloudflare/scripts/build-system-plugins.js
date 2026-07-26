@@ -116,6 +116,20 @@ async function main() {
         files.push(name);
       }
     }
+    // buildOne() above only guards the DOWNLOAD/manifest step (a GitHub
+    // fetch failure, or a first-party plugin with no manifest.json at all).
+    // It says nothing about whether the plugin's actual CODE landed — an
+    // `install:true` entry whose main.js is missing (corrupt release asset,
+    // half-finished first-party plugin) used to still exit 0 here and ship
+    // `enabled:true` with zero code (§3.7, calev NO-GO round 3, finding 4).
+    // A plugin promised via `install:true` must ship runnable code, not just
+    // a manifest.
+    if (!files.includes('main.js')) {
+      throw new Error(
+        `plugin "${id}" has install=true but no main.js was found in ${srcDir} — ` +
+        `cannot ship an enabled plugin with no code`,
+      );
+    }
     const enabled = cfg.enabled === true;
     manifestEntries.push({ id, version, files, enabled });
     console.log(`  ${id.padEnd(24)} ${String(version).padEnd(12)} enabled=${enabled}  (${cfg.source})`);
