@@ -580,6 +580,15 @@ const MOBILE_SCRIPTS = [
         e.target.closest('.mobile-onboarding button.mod-cta, .mobile-vault-chooser-screen button.mod-cta');
       if (!btn) return;
 
+      // §3.6 (calev-heavy NO-GO round 2, ממצא 2): כפתור-הדמו שלנו
+      // (installDemoVaultButton) חי בתוך `.mobile-onboarding` ונושא
+      // `mod-cta` ⇒ תואם את ה-selector למעלה ונחטף. זיהוי-לפי-class/מיקום
+      // יישבר שוב ברגע שכפתור-שלנו נוסף/משתנה (זו הפעם השנייה שבורר-לפי-
+      // מראה נשבר בסלייס הזה) — הפתרון הנכון הוא לסמן במפורש כל כפתור
+      // שאנחנו מזריקים (`data-ow-injected`, ראה installDemoVaultButton
+      // וגם showGrantScreen למטה) ולדלג עליו כאן, לפני כל בדיקה אחרת.
+      if (btn.hasAttribute('data-ow-injected')) return;
+
       // §3.5ב (calev PARTIAL, ממצא 1 — DoD#13): היה כאן גם התאמת-טקסט
       // (btnText === 'Create a vault' || 'Create') לפני הבדיקה למטה — טקסט
       // מתורגם ⇒ ב-43 מתוך 44 השפות ב-language-dropdown (המסך הראשון של
@@ -592,18 +601,33 @@ const MOBILE_SCRIPTS = [
       // equivalent מופיע גם בכפתור-ה-mod-cta של מסך-הפתיחה הראשוני (welcome
       // screen, "Your thoughts are yours") — שמוביל לצעד הבא (sync-intro)
       // ולא ליצירה בפועל, ושל מסך "other sync" (מוביל לאותו צעד-configure).
-      // המסך האמיתי היחיד ("Configure your new vault" / מודל "Create new
-      // vault") הוא היחיד שמרנדר גם input[type=text] (שם ה-vault) **באותו
-      // .mobile-onboarding/.mobile-vault-chooser-screen root** — אומת ידנית
-      // מול vendor/obsidian-mobile/app.js (הפונקציות hte/w): שני המסכים
-      // האלה בונים .formEl עם addText+radio-group יחד; מסכי הביניים (welcome,
-      // sync-intro, other-sync) לא. ה-controller מ-detach()-ט את המסך הקודם
-      // בכל goTo() (previousScreens.push + contentEl.detach()) ⇒ תמיד רק מסך
-      // אחד מחובר ל-DOM בפועל תחת השורש — querySelector כאן לא "רואה" input
-      // ממסכים קודמים/מנותקים. עוגן ב-DOM/מבנה, לא בטקסט (§3.5ב).
+      //
+      // §3.6 (calev-heavy NO-GO round 2, ממצא 1 — DoD#17): "יש input[type=text]
+      // באותו screen" **לבדו** התברר לא-מספיק כדיסקרימינטור — מסך "Sign in to
+      // your Obsidian account" (`Use my existing vault → Obsidian Sync →
+      // Connect → Sign in`) מרנדר גם הוא input[type=text] (השדה המוסתר של
+      // קוד-האימות בן-6-הספרות, `offsetParent===null`, `autocomplete=
+      // one-time-code`) — אומת ב-vendor/obsidian-mobile/app.js (הפונקציה
+      // `yte`). לחיצה על Sign in נחטפה ⇒ יצרה כספת-זבל "Untitled" וניווטה,
+      // וההתחברות הפכה בלתי-אפשרית. דיסקרימינטור **חיובי** נוסף: קבוצת-הרדיו
+      // של מיקום-האחסון (`.mobile-onboarding-radio-option`) היא הסימן הייחודי
+      // של מסך-יצירת-הכספת. אומת מול הבאנדל: מסך ה-Sign-in (`yte`) אינו
+      // בונה `ste` (radio-group) כלל — רק שלושה שדות `ate` (email/password/
+      // mfa); שתי המסכים היחידים שמרנדרים גם input[type=text] וגם
+      // .mobile-onboarding-radio-option **באותו screen** הם "Configure your
+      // new vault" (`hte`) ומודל "Create new vault" (`w`) — שניהם בונים
+      // .formEl עם addText+radio-group יחד. מסכי-ביניים אחרים שיש בהם
+      // radio-group (הצפנה, בחירת-שיטת-סנכרון, "Connect to...") אין להם
+      // input[type=text] כלל (רק type=password, או שום שדה-טקסט) — אומת
+      // ידנית, לא רק בקוד הזה.
+      // ה-controller מ-detach()-ט את המסך הקודם בכל goTo() (previousScreens.
+      // push + contentEl.detach()) ⇒ תמיד רק מסך אחד מחובר ל-DOM בפועל תחת
+      // השורש — querySelector כאן לא "רואה" input/radio ממסכים קודמים/
+      // מנותקים. עוגן ב-DOM/מבנה, לא בטקסט (§3.5ב, עדיין תקף).
       var screen = btn.closest('.mobile-onboarding, .mobile-vault-chooser-screen');
       var nameInput = screen && screen.querySelector('input[type="text"]');
-      if (!screen || !nameInput) return;
+      var hasLocationRadio = screen && screen.querySelector('.mobile-onboarding-radio-option');
+      if (!screen || !nameInput || !hasLocationRadio) return;
 
       e.preventDefault();
       e.stopImmediatePropagation();   // עוצר את onCreateVault הנייטיב (מונע את ה-mkdir הנכשל)
@@ -777,10 +801,28 @@ const MOBILE_SCRIPTS = [
       if (!root || root.querySelector('.ow-demo-vault-btn')) return;
       var btn = document.createElement('button');
       btn.className = 'ow-demo-vault-btn mod-cta';
+      // §3.6 (calev-heavy NO-GO round 2, ממצא 2 — DoD#18): זה הכפתור שנחטף
+      // ע"י installCreateVaultInterceptor — הוא `button.mod-cta` בתוך
+      // `.mobile-onboarding`, בדיוק ה-selector של ה-interceptor, ועל מסך
+      // "Configure your new vault" גם `input[type=text]` (שדה השם) וגם
+      // הרדיו קיימים ⇒ הדיסקרימינטור החדש למעלה לא היה מספיק להוציא אותו.
+      // הפתרון: לסמן, לא לזהות. כל כפתור שאנחנו מזריקים נושא
+      // `data-ow-injected` וה-interceptor מדלג עליו במפורש (למעלה, השורה
+      // הראשונה ב-handler) — זיהוי-לפי-class/מיקום כבר נשבר פעמיים בסלייס
+      // הזה, לא עוד ניחוש שלישי.
+      btn.setAttribute('data-ow-injected', 'demo-vault');
       btn.type = 'button';
       btn.textContent = 'כספת דמו';
-      btn.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:9999;' +
-        'padding:8px 16px;border:none;border-radius:4px;background:#7f6df2;' +
+      // §3.6ג (calev-heavy NO-GO round 2, ממצא 5): ב-390×844 (mobile) ה-footer
+      // (`.mod-version`, §3.4) יושב קבוע ב-y≈787 מתוך גובה-viewport 844 — נמדד
+      // ישירות (boundingBox) בכל שלבי-האשף, לא רק "לפעמים נמוך יותר". הכפתור
+      // ב-bottom:16px (גובה 44) חופף אותו (y 784-828 מול 787-804). בדסקטופ
+      // (1280×800, נמדד) אין שום חפיפה — הטקסט מתחיל ב-x=410, הכפתור מסתיים
+      // ב-x≈104. bottom גבוה יותר על viewport צר בלבד (heuristic על רוחב,
+      // לא UA-sniffing) מרים את הכפתור מעל שורת-הגרסה בלי לגעת בדסקטופ.
+      var narrowViewport = window.innerWidth <= 480;
+      btn.style.cssText = 'position:fixed;left:16px;bottom:' + (narrowViewport ? '68px' : '16px') +
+        ';z-index:9999;padding:8px 16px;border:none;border-radius:4px;background:#7f6df2;' +
         'color:#fff;cursor:pointer;font:13px -apple-system,BlinkMacSystemFont,sans-serif;';
       btn.addEventListener('click', function (e) {
         e.preventDefault();
@@ -853,6 +895,13 @@ const MOBILE_SCRIPTS = [
       var overlay = document.getElementById('ow-loading');
       setStatus('Access to "' + handle.name + '" is needed to continue.');
       var btn = document.createElement('button');
+      // §3.6: same marking convention as installDemoVaultButton — this one
+      // lives in `#ow-loading` (not under `.mobile-onboarding`/
+      // `.mobile-vault-chooser-screen`) so installCreateVaultInterceptor's
+      // selector can never match it today, but "every button we inject gets
+      // marked" is the rule going forward, not "every button we've checked
+      // doesn't currently collide."
+      btn.setAttribute('data-ow-injected', 'grant-access');
       btn.textContent = 'Grant access to ' + handle.name;
       btn.style.cssText = 'margin-top:8px;padding:8px 16px;background:#7f6df2;color:#fff;' +
         'border:none;border-radius:4px;cursor:pointer;font:13px -apple-system,BlinkMacSystemFont,sans-serif;';
