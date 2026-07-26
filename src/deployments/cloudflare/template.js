@@ -98,7 +98,7 @@ This is a live demo of **obsidian-web**, an open-source project that runs Obsidi
 
   ['How It Works.md', `# How It Works
 
-**obsidian-web** runs Obsidian's original mobile renderer code (\`app.js\`, extracted from the official Android app) almost unmodified — just four small, documented build-time patches (\`scripts/patch-obsidian-mobile.js\`) that expose internal platform flags so the shims below can read/override them. Instead of forking Obsidian, we replace the Capacitor/Node.js APIs it depends on with browser-compatible shims.
+**obsidian-web** runs Obsidian's original mobile renderer code (\`app.js\`, extracted from the official Android app) with only four small, documented build-time patches (\`scripts/patch-obsidian-mobile.js\`): two expose internal platform flags (\`window.__owPlatform\`, \`window.__owPlatformOverrides\`) so the shims below can read/override them, and two adjust rendering for a desktop-style layout (gating the \`is-mobile\` body class, and showing the vault-profile panel that the mobile bundle otherwise hides). Instead of forking Obsidian, we replace the Capacitor/Node.js APIs it depends on with browser-compatible shims.
 
 ## Architecture
 
@@ -123,9 +123,9 @@ This deployment (Cloudflare Pages + a small edge Worker) does **not** store your
 | **Worker** (\`index.js\`) | Serves the static app bundle. Two exceptions: \`POST /api/proxy-request\` (a CORS-safe proxy so community-plugin installs can reach GitHub) and the \`/starter\`, \`/vault/*\` SPA-fallback routes |
 | **OPFS** | The [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) — a private, sandboxed filesystem the browser gives this site. Your vault's files live there, on your device |
 | **Seed** | On first visit, this demo vault's files are copied into your own OPFS vault once (client-side, \`seed-example-vault.js\`) — after that, it's just your vault |
-| **Plugins** | This demo ships two [community plugins](https://obsidian.md/plugins) — [Dataview](https://github.com/blacksmithgu/obsidian-dataview) (enabled) and [LiveSync](https://github.com/vrtmrz/obsidian-livesync) (installed, disabled) — the same way installing one from inside Obsidian would: downloaded from GitHub at build time, not written by hand. That's what \`POST /api/proxy-request\` above is for |
+| **Plugins** | This demo ships two [community plugins](https://obsidian.md/plugins) — [Dataview](https://github.com/blacksmithgu/obsidian-dataview) (enabled) and [LiveSync](https://github.com/vrtmrz/obsidian-livesync) (installed, disabled) — the same way installing one from inside Obsidian would: downloaded from GitHub at *build time* (Node fetches the release directly — no proxy involved) and packaged into this deployment ahead of time. \`POST /api/proxy-request\` above is a separate, *runtime* thing: a CORS bridge the browser uses when Obsidian's own code needs to reach GitHub or obsidian.md directly |
 
-There is no server-side database, no cross-tab WebSocket sync, and no scheduled reset in this deployment — everything about **your vault's data** lives entirely in your browser's OPFS. Installing plugins is the one thing that does talk to the network (GitHub, via the proxy above) — the vault's *contents* still never leave your browser.
+There is no server-side database, no cross-tab WebSocket sync, and no scheduled reset in this deployment — everything about **your vault's data** lives entirely in your browser's OPFS. The proxy above does fire on every load, with no action from you — Obsidian's own community-plugin deprecation check, a couple of small requests for a JSON file, nothing bigger. The vault's *contents* still never leave your browser.
 
 ## Fast bootstrap (server-backed mode only)
 
@@ -196,7 +196,7 @@ const vault = new Map<string, VaultFile>();
 
 ## Blockquote
 
-> Obsidian's renderer runs in the browser almost exactly as shipped — a handful of small build-time patches expose platform flags, nothing more.
+> Obsidian's renderer runs in the browser almost exactly as shipped — four small build-time patches, two exposing platform flags for the shims to read, and two adjusting layout/rendering for a desktop-style view (see [[How It Works]]).
 > The Capacitor/Node.js APIs it depends on are replaced with browser-native shims (OPFS in this demo).
 
 ## Callouts
