@@ -238,9 +238,14 @@ Obsidian's killer feature — bidirectional links between notes.
 
 Open this note and click the **backlinks icon** in the right sidebar. You'll see every note that links here.
 
-Notes linking to this page:
-- [[Welcome]] (from the notes list)
-- [[Features/Markdown Showcase]] (from the bottom navigation)
+Notes linking to this page — computed live, not hand-typed (a static list here would go stale the
+moment a link changes anywhere in the vault, same reasoning as the "Tags in This Vault" queries in
+[[Features/Tags]]):
+
+\`\`\`dataview
+LIST
+FROM [[]]
+\`\`\`
 
 ## Outgoing Links
 
