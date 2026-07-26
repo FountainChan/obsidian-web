@@ -25,9 +25,16 @@
  *     scripts/install-plugin.js (main.js/manifest.json/styles.css +
  *     LICENSE) into vendor/plugins/<id>/, then copied the same way.
  *
- * A GitHub download failure never fails the whole build — it warns, skips
- * that one plugin, and the build continues with everything else (matches
- * the previous LiveSync-only behavior).
+ * A plugin listed with `install: true` MUST resolve — a GitHub download
+ * failure (or a bad config: no repo, unknown source, missing first-party
+ * manifest) throws and fails the WHOLE build (see main()'s top-level
+ * .catch(), which process.exit(1)s). This used to warn-and-skip instead,
+ * matching the previous LiveSync-only behavior — but once a demo text
+ * *claims* a plugin is installed (docs/plans/demo-and-docs-truth.md §3.5-a,
+ * "Features/Dataview Queries.md"), a soft failure here silently reships
+ * that exact claim as a lie: build exits 0, the manifest just drops the
+ * plugin, and nobody notices until a visitor sees 4 raw ```dataview code
+ * blocks (§3.6-ג, DoD#13). Failing loudly is the fix.
  *
  * Usage (invoked by build-assets.sh):
  *   node build-system-plugins.js <configPath> <mainDir> <publicDir>
@@ -42,13 +49,19 @@ const { installPlugin } = require('../../../../scripts/install-plugin');
 // the publicly-served build output — see the header comment above.
 const ASSET_NAMES = ['main.js', 'manifest.json', 'styles.css', 'LICENSE'];
 
+// Only called for cfg.install === true entries (main()'s loop filters first)
+// — every branch here means "this plugin was promised, so it must resolve."
+// Throwing (rather than warn+return null) is the point of this function now:
+// see the header comment above (§3.6-ג, F4).
 async function buildOne(id, cfg, mainDir) {
   if (cfg.source === 'first-party') {
     const srcDir = path.join(mainDir, 'src', 'plugins', id);
     const manifestPath = path.join(srcDir, 'manifest.json');
     if (!fs.existsSync(manifestPath)) {
-      console.warn(`  WARN: first-party plugin "${id}" has no src/plugins/${id}/manifest.json — skipping`);
-      return null;
+      throw new Error(
+        `plugin "${id}" has install=true (source=first-party) but no ` +
+        `src/plugins/${id}/manifest.json — cannot ship what's promised`,
+      );
     }
     const version = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).version;
     return { srcDir, version };
@@ -56,21 +69,18 @@ async function buildOne(id, cfg, mainDir) {
 
   if (cfg.source === 'github') {
     if (!cfg.repo) {
-      console.warn(`  WARN: plugin "${id}" has source=github but no repo — skipping`);
-      return null;
+      throw new Error(`plugin "${id}" has install=true (source=github) but no repo configured`);
     }
     const pinnedVersion = (cfg.versionEnv && process.env[cfg.versionEnv]) || undefined;
     try {
       const result = await installPlugin({ repo: cfg.repo, dest: id, version: pinnedVersion });
       return { srcDir: path.join(mainDir, 'vendor', 'plugins', id), version: result.version };
     } catch (err) {
-      console.warn(`  WARN: ${id} download failed (${err.message}) — skipping preinstall (build continues)`);
-      return null;
+      throw new Error(`plugin "${id}" has install=true but the GitHub download failed: ${err.message}`);
     }
   }
 
-  console.warn(`  WARN: plugin "${id}" has unknown source "${cfg.source}" — skipping`);
-  return null;
+  throw new Error(`plugin "${id}" has install=true but unknown source "${cfg.source}"`);
 }
 
 async function main() {
@@ -90,9 +100,11 @@ async function main() {
       continue;
     }
 
-    const resolved = await buildOne(id, cfg, mainDir);
-    if (!resolved) continue;
-    const { srcDir, version } = resolved;
+    // No `if (!resolved) continue` here anymore — buildOne() now throws
+    // instead of returning null for an install=true entry that can't be
+    // resolved, and that throw is meant to reach main().catch() below and
+    // fail the whole build (§3.6-ג, F4).
+    const { srcDir, version } = await buildOne(id, cfg, mainDir);
 
     const destDir = path.join(outDir, id);
     fs.mkdirSync(destDir, { recursive: true });
