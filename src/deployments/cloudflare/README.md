@@ -82,6 +82,18 @@ delete `template.js`.
 - **`POST /api/proxy-request`** — edge Worker proxy (`cf-worker-proxy`) with
   allow-list, SSRF-safe redirects, and Cache API for immutable downloads. See
   "What the Worker does now" above.
+- **Per-IP rate-limiting on `/api/proxy-request`** (`client-only-resilience`
+  §3.3) — an in-memory, isolate-lifetime counter (no KV/Durable Object): 30
+  requests/minute per `CF-Connecting-IP`, 429 past the limit. Chosen because
+  `caches.default` (see below) and Cloudflare's own WAF rate-limiting rules
+  are **both** zone-only — unavailable on this deployment (no custom
+  domain/route configured, see "Cache" below) — so "let Cloudflare handle it"
+  isn't an option here. Not a precise quota
+  (isolates recycle and the counter resets with them), but enough against
+  gross abuse of the proxy as an open relay. Requests with no
+  `CF-Connecting-IP` (never present in this deployment's own tests) bypass
+  the limiter entirely — in production behind Cloudflare the header is
+  always set.
 - **LiveSync preinstalled, disabled** (`cf-preinstall-livesync`) —
   `obsidian-livesync` ships in every new vault's `.obsidian/plugins/`, off by
   default; the user opts in via Settings → Community plugins. See "System
@@ -97,12 +109,13 @@ delete `template.js`.
   deployment and on the local dev server.
 
 ## Known gaps (follow-ups)
-1. **Per-IP rate-limiting** on `/api/proxy-request` — not implemented yet.
-   Requires a KV namespace binding + Cloudflare account config (out of scope
-   for a code-only slice). Cache already cuts most of the repeat-download
-   load; rate-limiting is a defense-in-depth follow-up against abuse of the
-   proxy as an open relay, not a functional blocker. (Tracked for
-   `client-only-resilience` — update this note once implemented.)
+1. **Rate limiting is per-isolate, not a precise per-account quota.** The
+   in-memory counter (see "What's included" above) resets whenever Cloudflare
+   recycles the isolate — a determined attacker distributed across many
+   isolates/IPs isn't meaningfully throttled. Moving to KV/Durable Objects
+   would fix this but needs an account-level binding (out of scope for a
+   code-only slice); the current approach is deliberately "enough against
+   gross abuse," not a hard guarantee.
 2. Two font files referenced by `obsidian-mobile/app.css` ("Inter",
    `public/fonts/*.woff2`) 404 — `vendor/obsidian-mobile` never included a
    `public/` dir. Cosmetic only (`font-display: swap` → system font fallback);

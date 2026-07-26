@@ -10,8 +10,8 @@
 //
 // Run: bun test src/deployments/cloudflare/test/proxy-worker.test.js
 
-import { expect, test, describe } from 'bun:test';
-import { handleProxy, isAllowed, isCacheableHost, bytesToB64, b64ToBytes } from '../proxy-worker.js';
+import { expect, test, describe, beforeEach } from 'bun:test';
+import { handleProxy, isAllowed, isCacheableHost, bytesToB64, b64ToBytes, __resetRateLimit } from '../proxy-worker.js';
 
 // ── caches.default mock (DoD#4) ──────────────────────────────────────────────
 // Bun has no global `caches` (that's a Worker/Service-Worker runtime API) —
@@ -58,6 +58,22 @@ function postRequest(body) {
     body: JSON.stringify(body),
   });
 }
+
+function postRequestFromIp(ip, body) {
+  return new Request('https://worker.example/api/proxy-request', {
+    method: 'POST',
+    headers: { 'CF-Connecting-IP': ip },
+    body: JSON.stringify(body),
+  });
+}
+
+// ── §3.3 rate limiting — the module-level Map is shared across every case in
+// this bun-test file (brief finding), so it must be reset before EACH test —
+// not just the rate-limiting describe block below — otherwise an earlier
+// test's requests-from-a-known-IP could bleed into a later one.
+beforeEach(() => {
+  __resetRateLimit();
+});
 
 // ── DoD#7 — isAllowed unit ──────────────────────────────────────────────────
 
@@ -340,4 +356,52 @@ test('strips forbidden request headers before fetch (calev medium finding)', asy
     expect(seenHeaders['Connection'] || seenHeaders['connection']).toBeUndefined();
     expect(seenHeaders['Authorization']).toBe('Basic zzz');   // legit header survives
   } finally { globalThis.fetch = origFetch; }
+});
+
+// ── §3.3 — rate limiting (docs/plans/client-only-resilience.md) ────────────
+// Uses 'https://evil.com/x' as the target on purpose: isAllowed() rejects it
+// with a fast, network-free 403 — proves the rate-limit check runs (or
+// doesn't) without depending on real network calls or DoD#1/2's manifest
+// fetch. A 403 vs 429 status is exactly what distinguishes
+// "rate-limited" from "reached the handler and got rejected for another
+// reason" here.
+
+describe('rate limiting (§3.3)', () => {
+  test('DoD#6: under the 30/min limit → no 429 (still 403s from isAllowed, not rate-limited)', async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await handleProxy(postRequestFromIp('1.2.3.4', { url: 'https://evil.com/x' }), makeCtx());
+      expect(res.status).toBe(403);
+    }
+  });
+
+  test('DoD#6: the 31st request/min from one IP → 429', async () => {
+    let last;
+    for (let i = 0; i < 31; i++) {
+      last = await handleProxy(postRequestFromIp('5.6.7.8', { url: 'https://evil.com/x' }), makeCtx());
+    }
+    expect(last.status).toBe(429);
+  });
+
+  test('a different IP is unaffected by another IP already at its limit', async () => {
+    for (let i = 0; i < 31; i++) {
+      await handleProxy(postRequestFromIp('9.9.9.9', { url: 'https://evil.com/x' }), makeCtx());
+    }
+    const res = await handleProxy(postRequestFromIp('1.1.1.1', { url: 'https://evil.com/x' }), makeCtx());
+    expect(res.status).not.toBe(429);
+  });
+
+  test('missing CF-Connecting-IP bypasses the limiter entirely (matches prod-behind-Cloudflare vs. test reality)', async () => {
+    for (let i = 0; i < 40; i++) {
+      const res = await handleProxy(postRequest({ url: 'https://evil.com/x' }), makeCtx());
+      expect(res.status).not.toBe(429);
+    }
+  });
+
+  test('DoD#7 sanity: rate limiting does not block a legitimate request under the limit', async () => {
+    const res = await handleProxy(postRequestFromIp('8.8.4.4', {
+      url: 'https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json',
+      method: 'GET',
+    }), makeCtx());
+    expect(res.status).toBe(200);
+  }, 20000);
 });

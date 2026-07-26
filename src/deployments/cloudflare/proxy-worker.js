@@ -97,7 +97,55 @@ export function isCacheableHost(urlStr) {
   }
 }
 
+// ── rate limiting (§3.3, docs/plans/client-only-resilience.md) ─────────────
+// In-memory, isolate-lifetime counter — NOT KV/Durable-Object state. Decision
+// (see brief §3.3): caches.default is a documented no-op on *.pages.dev (no
+// zone — same limitation this file's Cache API section already notes), and
+// that SAME limitation rules out Cloudflare WAF rate-limiting rules (also
+// zone-only) — "let Cloudflare handle it" isn't available on this
+// deployment. handleProxy(request, ctx) deliberately does NOT gain an `env`
+// parameter for this — a plain Map needs none, and proxy-worker.test.js:337
+// already passes an (unused) third argument, so adding a real `env` there
+// would silently collide with it for no benefit.
+// Approved by the user (2026-07-25): 30 requests/minute per IP — generous
+// enough for a plugin-install burst, tight enough against gross abuse.
+// NOT precise: isolates recycle and the Map resets with them — acceptable
+// per the user's own framing ("enough against abuse, not a hard quota").
+const RATE_LIMIT_PER_MINUTE = 30;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+let rateLimitMap = new Map();
+
+// Exposed for tests only: a module-level Map persists across every test case
+// in a single bun-test file run, so cases would otherwise leak counters into
+// each other (brief §3.3 finding). Call from beforeEach.
+export function __resetRateLimit() {
+  rateLimitMap = new Map();
+}
+
+// Missing CF-Connecting-IP bypasses the limiter entirely — in production
+// behind Cloudflare the header is always present; proxy-worker.test.js's
+// ~15 pre-existing DoD calls never set it (brief §3.3 finding: rate-limiting
+// them by IP would 429 the whole file since they'd all share one bucket).
+function checkRateLimit(ip) {
+  if (!ip) return true;
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    rateLimitMap.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= RATE_LIMIT_PER_MINUTE;
+}
+
 export async function handleProxy(request, ctx) {
+  // Cheapest possible check first — before even parsing the body — so an
+  // abusive client pays no JSON-parse cost either.
+  const clientIp = request.headers.get('CF-Connecting-IP');
+  if (!checkRateLimit(clientIp)) {
+    return json({ error: 'rate limit exceeded' }, 429);
+  }
+
   let payload;
   try {
     payload = await request.json();
