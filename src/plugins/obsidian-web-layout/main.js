@@ -10,7 +10,10 @@
  *
  * The mode is persisted in localStorage under "obsidian-web:layout-mode".
  * client-mobile/boot.js reads this key and sets window.__owPlatformOverrides
- * before the Obsidian bundle initializes Platform.
+ * before the Obsidian bundle initializes Platform. window.__owPlatform
+ * itself is populated by client-mobile/platform-bridge.js's runtime
+ * interception (not a build-time patch — see
+ * docs/plans/runtime-platform-descriptors.md).
  *
  * In real Obsidian (desktop or mobile app) window.__owPlatform does not
  * exist, so this plugin loads as a no-op — no ribbon icon, no commands.

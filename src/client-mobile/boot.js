@@ -7,9 +7,12 @@
  *  3. הגדרת window.require לפלאגינים
  *  4. async: אימות vault → הזרקה דינמית של scripts → הסרת ספינר
  *
- * הפריסה (mobile/desktop) נקבעת ב-build-time patches על
- * obsidian-mobile/app.js — ראה scripts/patch-obsidian-mobile.js.
- * כאן רק קובעים את ה-overrides שה-IIFE של הbundle יקרא.
+ * הפריסה (mobile/desktop) נקבעת ב-client-mobile/platform-bridge.js —
+ * יירוט Object.defineProperty בזמן ריצה שקורא את ה-overrides שנקבעים כאן
+ * (ראה docs/plans/runtime-platform-descriptors.md). patch יחיד ותיעודי
+ * (vault-profile-on-desktop-layout) עדיין קיים ב-scripts/patch-obsidian-mobile.js
+ * — כל שאר התנהגות-הפלטפורמה מותאמת ברמת-ריצה, לא ע"י עריכת app.js.
+ * כאן רק קובעים את ה-overrides ש-platform-bridge.js יקרא בעצלתיים בזמן ה-install.
  */
 
 // רשימת הscripts של Obsidian Mobile — מוזרקים דינמית אחרי האימות.
@@ -205,9 +208,10 @@ const MOBILE_SCRIPTS = [
   }
 
   // ── Platform overrides — applied BEFORE app.js loads ──────────────────────
-  // הbundle עבר 3 patches (ראה scripts/patch-obsidian-mobile.js) שגורמים
-  // ל-IIFE שלו למזג את האובייקט הזה לתוך דגלי ה-Platform עם Object.assign,
-  // אחרי ברירות המחדל. מה שמוגדר כאן מנצח.
+  // client-mobile/platform-bridge.js קורא את האובייקט הזה בעצלתיים, בזמן
+  // שהוא לוכד את ה-Platform האמיתי דרך יירוט Object.defineProperty (לא
+  // build-time patch — ראה docs/plans/runtime-platform-descriptors.md).
+  // מה שמוגדר כאן מנצח.
   //
   // המצב נשמר ב-localStorage תחת המפתח 'obsidian-web:layout-mode'.
   // deploy-config.md §3(ג): layout.default הוא ה-fallback כשאין עדיין
@@ -1221,7 +1225,10 @@ const MOBILE_SCRIPTS = [
       // ── Vault switcher click → openVaultChooser ──────────────────────────
       // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
       // הוא true. ב-patch-obsidian-mobile.js שינינו את התנאי הזה ל-!isMobile כדי
-      // שהפאנל יופיע גם במצב desktop-layout. אבל ה-click handler המקורי בתוך
+      // שהפאנל יופיע גם במצב desktop-layout — זהו ה-patch היחיד שנותר על app.js
+      // (vault-profile-on-desktop-layout; שאר התנהגות-הפלטפורמה עברה ל-runtime
+      // interception ב-platform-bridge.js, ראה docs/plans/runtime-platform-descriptors.md
+      // §1). אבל ה-click handler המקורי בתוך
       // הפאנל קורא ל-`electron.ipcRenderer.sendSync("vault" | "vault-list" |
       // "vault-open")` — שלא קיים ב-mobile runtime (אין shim ל-window.electron
       // ב-client-mobile/). תופסים את הקליק בשלב ה-capture, חוסמים את ה-handler

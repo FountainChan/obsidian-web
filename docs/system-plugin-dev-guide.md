@@ -163,8 +163,9 @@ app.plugins.enablePlugin('obsidian-web-<name>');
 
 `plugins/obsidian-web-layout/` הוא ה-system plugin הראשון, מימוש מינימלי טוב:
 
-- ~95 שורות.
-- מוסיף ribbon icon + 3 commands.
+- ~140 שורות.
+- מוסיף ribbon icon + 3 commands — משתיק את שניהם ויזואלית כש-`localStorage.EmulateMobile`
+  פעיל (`docs/plans/runtime-platform-descriptors.md` §3.5), במקום להישאר "פעיל אך חסר-אפקט".
 - קורא/כותב ל-`localStorage` (אין `data.json` settings).
 - עושה feature detection על `window.__owPlatform`.
 
