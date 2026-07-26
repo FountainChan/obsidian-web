@@ -17,12 +17,16 @@
   <h1>platform-bridge queue self-test</h1>
   <p>
     Covers docs/plans/runtime-platform-descriptors.md §5 DoD#12's "same-turn"
-    case and §5 DoD#13 — both are impossible to reproduce against the real
-    obsidian-mobile bundle from outside (app.js's own module-level code runs
-    the real Object.defineProperty('Platform', ...) call, so we can't inject
-    a second same-turn candidate ahead of it). No app.js is loaded on this
+    case, §5 DoD#13, the per-candidate tick-budget semantics of §3.1, and the
+    §3.1a post-app.js-load give-up path — all impossible to reproduce against
+    the real obsidian-mobile bundle from outside (app.js's own module-level
+    code runs the real Object.defineProperty('Platform', ...) call and its
+    own `load` event, so we can't inject a second same-turn candidate ahead
+    of it, nor control exactly when it "loads"). No app.js is loaded on this
     page at all — each scenario runs platform-bridge.js fresh inside its own
-    iframe so state never bleeds between them.
+    iframe so state never bleeds between them; Scenario C simulates app.js's
+    `load` signal by calling window.__owPlatformBridge.notifyAppJsLoaded()
+    directly, the same hook boot.js calls for real.
   </p>
   <div id="summary">Running…</div>
   <pre id="out"></pre>
@@ -69,12 +73,22 @@
       }
 
       try {
-        // ── Scenario A — same-turn queue (brief §5 DoD#12, "המקרה שבגללו התור קיים") ──
-        // Two Object.defineProperty(win, 'Platform', ...) calls fired back-to-back in
-        // the SAME synchronous turn — before any microtask (and so before the bridge's
-        // pump loop) has run. The first is foreign/invalid-shape, the second is the
-        // real (already-ready) shape. Asserts the second is not clobbered by the first,
-        // and that the first's rejection doesn't consume the second's tick budget.
+        // ── Scenario A — same-turn queue + per-candidate tick budget (brief §5
+        // DoD#12 "המקרה שבגללו התור קיים" + §3.1a finding 4 — the previous version
+        // of this scenario resolved its first candidate immediately, so it never
+        // actually exercised a per-candidate tick budget at all). Two
+        // Object.defineProperty(win, 'Platform', ...) calls fire back-to-back in
+        // the SAME synchronous turn — before any microtask (and so before the
+        // bridge's pump loop) has run. The FIRST candidate is foreign-but-
+        // Platform-shaped and NEVER resolves (its getter returns undefined forever,
+        // incrementing its own `tries` every pump tick without end — simulating a
+        // foreign library whose own assignment never lands). The SECOND is the
+        // real candidate, but — like the real bundle (spike: "2 ticks" between
+        // webpack wiring the getter and `var bn=` landing) — not ready on its very
+        // first check either; it only starts returning the real object a few ticks
+        // in. If it still captures well before CAPTURE_TICK_CEILING (500) despite
+        // sitting behind a candidate that never stops consuming ITS OWN budget,
+        // that proves the ceiling is tracked per-candidate, not shared/global.
         {
           const f = makeIframe();
           const win = f.contentWindow;
@@ -85,15 +99,25 @@
           await loadScript(win, doc, '/client-mobile/platform-bridge.js');
 
           const realPlatform = { isMobileApp: true, canPinSidebar: true, isMobile: false, isDesktop: true, canSplit: true };
+          let firstGetterCalls = 0;
+          let secondGetterCalls = 0;
           // Both calls happen synchronously, no await between them — same turn.
-          win.Object.defineProperty(win, 'Platform', { get: function () { return { foo: 1 }; }, configurable: true }); // foreign, invalid shape
-          win.Object.defineProperty(win, 'Platform', { get: function () { return realPlatform; }, configurable: true }); // real, valid shape, ready immediately
+          win.Object.defineProperty(win, 'Platform', {
+            get: function () { firstGetterCalls++; return undefined; }, // foreign, never resolves
+            configurable: true,
+          });
+          win.Object.defineProperty(win, 'Platform', {
+            get: function () { secondGetterCalls++; return secondGetterCalls >= 4 ? realPlatform : undefined; }, // real, ready after a few ticks
+            configurable: true,
+          });
 
-          await wait(50); // a handful of microtask/timer turns — pump only needs 1-2
+          await wait(50); // a handful of microtask/timer turns — the real candidate only needs ~4
 
-          assert(win.__owPlatform === realPlatform, 'Scenario A: the SECOND (valid) candidate wins — not clobbered by the first');
+          assert(win.__owPlatform === realPlatform, 'Scenario A: the SECOND (real) candidate captures even though the FIRST (foreign, ahead of it in the queue) never resolves and keeps ticking forever');
           assert(win.__owPlatform.isMobile === false, 'Scenario A: locked isMobile reflects __owPlatformOverrides (false = desktop layout)');
           assert(win.Object.defineProperty === nativeDP, 'Scenario A: Object.defineProperty restored to native after capture');
+          assert(secondGetterCalls >= 4 && secondGetterCalls < 20, 'Scenario A: the real candidate captured within a handful of its OWN ticks (not delayed waiting for the first to give up)');
+          assert(firstGetterCalls > 0, 'Scenario A: the foreign candidate was still being ticked on its own separate budget when the real one captured — proving the two are tracked independently (brief §3.1 "תקרה פר-מועמד, לא גלובלית")');
         }
 
         // ── Scenario B — §5 DoD#13 fallback: __owPlatformOverrides missing at install ──
@@ -123,23 +147,40 @@
           assert(warnings.some(function (w) { return /overrides missing/i.test(w); }), 'Scenario B: a warning was logged for the missing-overrides fallback');
         }
 
-        // ── Scenario C — an invalid-shape-only queue never captures, restores via the
-        // global safety net rather than hanging forever. Uses a short safety net by
-        // reading the module's own constant so this test doesn't need to wait 5s.
+        // ── Scenario C — the post-app.js-load give-up path (brief §3.1a, fixing
+        // finding 1 + finding 2). No real app.js exists in this synthetic page, so
+        // it's simulated by calling window.__owPlatformBridge.notifyAppJsLoaded()
+        // directly — the exact hook boot.js calls from app.js's own <script> `load`
+        // handler. Only an invalid-shape candidate is ever seen, so the queue
+        // drains to empty on the very first pump tick — long before app.js "loads".
+        // Once notifyAppJsLoaded() fires, the bridge must give up and restore
+        // Object.defineProperty SYNCHRONOUSLY (a queueMicrotask hop at most), NOT
+        // wait out the 30s GLOBAL_SAFETY_NET_MS wall-clock fallback — that fallback
+        // is for the case app.js never loads at all, not this one.
         {
           const f = makeIframe();
           const win = f.contentWindow;
           const doc = win.document;
           win.__owPlatformOverrides = { isMobile: false, isDesktop: true, isMobileApp: true };
+          const nativeDP = win.Object.defineProperty;
+
+          const warnings = [];
+          win.console.warn = function () { warnings.push(Array.prototype.slice.call(arguments).join(' ')); };
+
           await loadScript(win, doc, '/client-mobile/platform-bridge.js');
 
-          win.Object.defineProperty(win, 'Platform', { get: function () { return { nope: true }; }, configurable: true }); // never valid
+          win.Object.defineProperty(win, 'Platform', { get: function () { return { nope: true }; }, configurable: true }); // never valid — dropped same-tick, queue empties immediately
 
-          const ceiling = win.__owPlatformBridge.CAPTURE_TICK_CEILING;
-          assert(typeof ceiling === 'number' && ceiling > 0, 'Scenario C: bridge exposes a positive CAPTURE_TICK_CEILING for diagnostics');
-          // Not waiting out the full ceiling/safety-net here (would need real
-          // ticks/5s) — the ceiling's existence + Scenario A/B's synchronous
-          // restore-on-capture already cover the restore path this feeds into.
+          await wait(0); // let the invalid-shape candidate's same-tick drop actually run before notifying
+
+          assert(typeof win.__owPlatformBridge.notifyAppJsLoaded === 'function', 'Scenario C: bridge exposes notifyAppJsLoaded() — the hook boot.js calls on app.js\'s `load` event (§3.1a)');
+          win.__owPlatformBridge.notifyAppJsLoaded();
+
+          await wait(20); // well under the 30s safety net — proves this path doesn't need it
+
+          assert(win.Object.defineProperty === nativeDP, 'Scenario C: Object.defineProperty restored promptly after notifyAppJsLoaded(), not after waiting out the 30s wall-clock fallback');
+          assert(win.__owPlatform === undefined, 'Scenario C: nothing was ever captured — __owPlatform stays unset');
+          assert(warnings.some(function (w) { return /no Platform export was ever intercepted/i.test(w); }), 'Scenario C: the post-load give-up warning was logged');
         }
 
       } catch (err) {

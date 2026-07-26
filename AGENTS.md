@@ -48,3 +48,11 @@ See `docs/architecture.md` for the full picture.
 documented set of patches to the **local** copy. Keep that set as small as
 possible, and prefer a shim over a patch whenever the same result is reachable
 through a platform API.
+
+**Precedent**: `docs/plans/runtime-platform-descriptors.md` replaced 3 of the
+4 patches with a runtime shim (`src/client-mobile/platform-bridge.js`, which
+intercepts `Object.defineProperty` to capture Obsidian's own `Platform`
+object instead of rewriting app.js's byte-for-byte source) — read it before
+adding a new patch or deciding one is unavoidable. One patch
+(`vault-profile-on-desktop-layout`) still remains, as a documented exception,
+not an oversight.

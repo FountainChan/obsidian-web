@@ -76,6 +76,36 @@ test('computeWant: EmulateMobile is checked by truthiness of the raw value, not 
   assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
 });
 
+// ── isEmulateActive (second calev pass, live: localStorage.EmulateMobile="0" was
+// turning emulation ON because the string "0" is truthy in JS) ──
+
+test('isEmulateActive treats the string "0" as OFF, not truthy-and-therefore-on', () => {
+  assert.equal(bridge.isEmulateActive('0'), false);
+});
+
+test('isEmulateActive treats the string "false" (any case) as OFF', () => {
+  assert.equal(bridge.isEmulateActive('false'), false);
+  assert.equal(bridge.isEmulateActive('False'), false);
+  assert.equal(bridge.isEmulateActive('FALSE'), false);
+});
+
+test('isEmulateActive treats null/undefined/empty-string as OFF', () => {
+  assert.equal(bridge.isEmulateActive(null), false);
+  assert.equal(bridge.isEmulateActive(undefined), false);
+  assert.equal(bridge.isEmulateActive(''), false);
+});
+
+test('isEmulateActive treats "1"/"true"/arbitrary truthy strings as ON', () => {
+  assert.equal(bridge.isEmulateActive('1'), true);
+  assert.equal(bridge.isEmulateActive('true'), true);
+  assert.equal(bridge.isEmulateActive('yes'), true);
+});
+
+test('computeWant: EmulateMobile="0" does NOT activate emulation — regression for the live-caught bug above', () => {
+  const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '0');
+  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
+});
+
 // ── shouldWrapAddClass (§3.3 — "the exact condition, all three caveats folded in") ──
 
 test('shouldWrapAddClass is true when want is valid and isMobile is false (desktop layout — must suppress the unconditional addClass)', () => {
@@ -97,6 +127,12 @@ test('exposes named, positive tick/time budgets instead of magic numbers', () =>
   assert.ok(bridge.CAPTURE_TICK_CEILING > 0);
   assert.equal(typeof bridge.GLOBAL_SAFETY_NET_MS, 'number');
   assert.ok(bridge.GLOBAL_SAFETY_NET_MS > 0);
+  // brief §3.1a: this is now a last-resort-only fallback (app.js's own
+  // `load` event is the normal give-up anchor), so it must be generous —
+  // regression guard against re-introducing a short deadline that races
+  // app.js's own download time (finding 1: 5000ms was 92% consumed at
+  // 3 Mbps).
+  assert.ok(bridge.GLOBAL_SAFETY_NET_MS >= 15000);
   assert.equal(typeof bridge.ADDCLASS_SAFETY_NET_MS, 'number');
   assert.ok(bridge.ADDCLASS_SAFETY_NET_MS > 0);
 });

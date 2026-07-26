@@ -395,11 +395,21 @@ const MOBILE_SCRIPTS = [
     if (statusEl) statusEl.textContent = text;
   }
 
+  // חשוף עבור platform-bridge.js (נטען לפני script זה — index.html) — קו-
+  // 3.1א בבריף: אם ה-bridge בסופו-של-דבר מוותר על לכידת Platform, אזהרת
+  // console בלבד בלתי-נראית למשתמש. שורה זו רצה מוקדם וסינכרונית, הרבה לפני
+  // ש-app.js אפילו מוזרק — עד שה-bridge יכול לקרוא לזה בכלל (רק אחרי ש-app.js
+  // נטען, או אחרי רשת-הביטחון הארוכה), ה-hook כבר קיים.
+  window.__owReportPlatformFailure = function (msg) {
+    setStatus(msg);
+  };
+
   // הזרקה דינמית — browser מוריד במקביל, מריץ לפי סדר (async=false).
   // חולצה מ-for-loop inline (היה כאן במקור) לפונקציה נגישה גם לזרימת
   // ה-no-vault (מסך-הפתיחה הנייטיב, למטה) וגם לזרימת ה-VAULT_ID הרגילה.
   function injectMobileScripts() {
     var loaded = 0;
+    var appJsSrc = MOBILE_SCRIPTS[MOBILE_SCRIPTS.length - 1]; // app.js — תמיד אחרון (globals שהוא צריך חייבים לפניו)
     for (var i = 0; i < MOBILE_SCRIPTS.length; i++) {
       (function (src) {
         var s = document.createElement('script');
@@ -408,6 +418,13 @@ const MOBILE_SCRIPTS = [
         s.onload = function () {
           loaded++;
           setStatus('Loading Obsidian mobile (' + loaded + '/' + MOBILE_SCRIPTS.length + ')');
+          // עוגן חלון-הלכידה של platform-bridge.js (docs/plans/
+          // runtime-platform-descriptors.md §3.1a) — ה-`load` הנייטיבי של
+          // app.js עצמו, לא דדליין שרירותי שסופר את זמן-ההורדה שלו.
+          if (src === appJsSrc && window.__owPlatformBridge &&
+              typeof window.__owPlatformBridge.notifyAppJsLoaded === 'function') {
+            window.__owPlatformBridge.notifyAppJsLoaded();
+          }
         };
         s.onerror = function () {
           console.error('[obsidian-web] failed to load: ' + src);

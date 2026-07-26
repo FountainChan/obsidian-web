@@ -567,11 +567,12 @@ var Yl = {  // (Yl=desktop, bn=mobile — אותו אובייקט)
 };
 ```
 
-`isPhone` נקבע לפי **viewport width** (media query ~630px), **לא** לפי `isMobile`!
+`isPhone` נקבע לפי **viewport width** (media query ~600px — נמדד ישירות ב-DoD#6 של
+docs/plans/runtime-platform-descriptors.md, resize 1280→520 הופך אותו; תוקן מ-"~630px" הישן), **לא** לפי `isMobile`!
 
 #### מה שולט במה:
 
-| Feature | נשלט ע"י | desktop viewport (≥630px) עם isMobile=true |
+| Feature | נשלט ע"י | desktop viewport (≥600px) עם isMobile=true |
 |---|---|---|
 | Split panes | `!isPhone` | **עובד** ✅ |
 | Ribbon | `!isPhone` | **עובד** ✅ |
@@ -924,7 +925,7 @@ function pm(name) { return { name, rtype: 'promise' }; }
 
 ```js
 window.__owPlatform.isMobile      // true / false  (קריא)
-window.__owPlatform.isPhone       // נגזר מ-viewport (~630px), קריא לרוב
+window.__owPlatform.isPhone       // נגזר מ-viewport (~600px), קריא לרוב
 window.__owPlatform.isDesktopApp  // false ב-mobile bundle תמיד
 ```
 
