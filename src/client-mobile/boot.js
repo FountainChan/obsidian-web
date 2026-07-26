@@ -579,15 +579,28 @@ const MOBILE_SCRIPTS = [
       var btn = e.target && e.target.closest &&
         e.target.closest('.mobile-onboarding button.mod-cta, .mobile-vault-chooser-screen button.mod-cta');
       if (!btn) return;
-      var btnText = (btn.textContent || '').trim();
-      if (btnText !== 'Create a vault' && btnText !== 'Create') return;   // לא זה כפתור ה-Create (למשל "Continue without sync")
 
-      // הטקסט "Create a vault" מופיע גם בכפתור-ה-mod-cta של מסך-הפתיחה
-      // הראשוני (welcome screen, "Your thoughts are yours") — שמוביל לצעד
-      // הבא (sync-intro) ולא ליצירה בפועל. הצעד היחיד שבו יש input[type=text]
-      // בתוך אותו container הוא המסך האמיתי ("Configure your new vault" /
-      // מודל "Create new vault") — היעדרו מסמן שזה עדיין לא צעד היצירה,
-      // לא DOM שביר; מניחים לnative handler לרוץ כרגיל (ללא interception).
+      // §3.5ב (calev PARTIAL, ממצא 1 — DoD#13): היה כאן גם התאמת-טקסט
+      // (btnText === 'Create a vault' || 'Create') לפני הבדיקה למטה — טקסט
+      // מתורגם ⇒ ב-43 מתוך 44 השפות ב-language-dropdown (המסך הראשון של
+      // ה-onboarding) ההתאמה נכשלת, ה-interceptor לא רץ בכלל, ה-onCreateVault
+      // הנייטיב מנסה Filesystem.mkdir → 405 (אין /api/fs) → הכפתור הופך
+      // no-op מוחלט: אין כספת, אין ניווט, אין Notice. הוסר — הבדיקה למטה
+      // (input[type=text] קיים באותו screen) כבר מספקת את אותו סינון בלי
+      // תלות-שפה:
+      // הטקסט המתורגם "Create a vault"/"Configure your new vault"'s
+      // equivalent מופיע גם בכפתור-ה-mod-cta של מסך-הפתיחה הראשוני (welcome
+      // screen, "Your thoughts are yours") — שמוביל לצעד הבא (sync-intro)
+      // ולא ליצירה בפועל, ושל מסך "other sync" (מוביל לאותו צעד-configure).
+      // המסך האמיתי היחיד ("Configure your new vault" / מודל "Create new
+      // vault") הוא היחיד שמרנדר גם input[type=text] (שם ה-vault) **באותו
+      // .mobile-onboarding/.mobile-vault-chooser-screen root** — אומת ידנית
+      // מול vendor/obsidian-mobile/app.js (הפונקציות hte/w): שני המסכים
+      // האלה בונים .formEl עם addText+radio-group יחד; מסכי הביניים (welcome,
+      // sync-intro, other-sync) לא. ה-controller מ-detach()-ט את המסך הקודם
+      // בכל goTo() (previousScreens.push + contentEl.detach()) ⇒ תמיד רק מסך
+      // אחד מחובר ל-DOM בפועל תחת השורש — querySelector כאן לא "רואה" input
+      // ממסכים קודמים/מנותקים. עוגן ב-DOM/מבנה, לא בטקסט (§3.5ב).
       var screen = btn.closest('.mobile-onboarding, .mobile-vault-chooser-screen');
       var nameInput = screen && screen.querySelector('input[type="text"]');
       if (!screen || !nameInput) return;
@@ -604,10 +617,16 @@ const MOBILE_SCRIPTS = [
       var name = nameInput.value.trim() || 'Untitled';
       var selectedRadio = screen.querySelector('.mobile-onboarding-radio-option.is-selected');
       var location_ = 'app';   // ברירת-מחדל בטוחה — לא דורש directory picker/permission
-      if (selectedRadio) {
-        var titleEl = selectedRadio.querySelector('.mobile-onboarding-radio-option-title');
-        var title = (titleEl && titleEl.textContent) || '';
-        location_ = /app storage/i.test(title) ? 'app' : 'external';
+      // §3.5ב (calev PARTIAL, ממצא 1 — DoD#13): זה היה עדיין /app storage/i
+      // על הכותרת המרונדרת — נשכח באותה מכה כמו btnText למעלה, ונופל לאותה
+      // מלכודת: בעברית ("אחסון האפליקציה") ה-regex האנגלי לא תואם ⇒ location_
+      // היה יוצא 'external' גם כש-"App storage" נבחר בפועל. תוקן לאותו עוגן
+      // מבני שהגידור למטה (installExternalStorageGate) כבר משתמש בו: סדר
+      // ה-DOM שקבוע ע"י addOption('external').addOption('app') בבאנדל, לא
+      // הטקסט — index 0 בקבוצת האחים = external, index 1 = app.
+      if (selectedRadio && selectedRadio.parentNode) {
+        var siblings = selectedRadio.parentNode.querySelectorAll('.mobile-onboarding-radio-option');
+        location_ = (siblings[0] === selectedRadio) ? 'external' : 'app';
       }
       // §3.1ב layer 1 (logic, mandatory) — the "Device storage" radio option
       // renders already-selected (bundle default `.setValue('external')`,
@@ -640,13 +659,18 @@ const MOBILE_SCRIPTS = [
             // (Firefox/Safari, :474 — should be unreachable now that the
             // logic gate above forces 'app', but the visual gate is a
             // MutationObserver and could theoretically still race it once).
-            // UNSUPPORTED reaching here despite the gate means the user
-            // really did hit a dead end — say so, not just console.warn
-            // (§3.1). CANCELED is a normal, expected user action (Escape) —
-            // no Notice; just let the guard reset so retry works.
-            if (err && err.code === 'UNSUPPORTED' && typeof window.Notice === 'function') {
-              new window.Notice('אחסון חיצוני אינו נתמך בדפדפן זה — נעשה שימוש באחסון פנימי (App storage)');
-            }
+            // §3.5ג (calev PARTIAL, ממצא 2 — DoD#14): the user-facing Notice
+            // for UNSUPPORTED used to live only here — but this .catch only
+            // covers OUR OWN call to Filesystem.choose() (the branch above).
+            // The bundle's own "Use my existing vault" → "On this device" →
+            // choose-folder handler (vendor/obsidian-mobile/app.js, the kte
+            // screen) calls the SAME shim method directly, with no .catch of
+            // its own — that rejection landed in the console only, a silent
+            // dead end one click away from this one. Moved the Notice into
+            // shims/capacitor-shim.js's choose() itself, the single shared
+            // entry point for every caller (ours AND the bundle's) — see
+            // there. CANCELED (normal Escape) still gets no Notice, only the
+            // guard reset below.
             // Naive immediate reset re-opens the guard DURING the same
             // physical click's pointerdown/mousedown/click trio (line ~648)
             // when the throw is synchronous (UNSUPPORTED) — that would fire
@@ -681,31 +705,51 @@ const MOBILE_SCRIPTS = [
   // הזה מרונדר גם במסך ה-onboarding הראשוני וגם במודל "Create new vault" —
   // וכל שלב-אשף עשוי לרנדר-מחדש. לא רץ בכלל ב-Chromium (return מוקדם) — שם
   // showDirectoryPicker עובד, אין מה לגדר.
+  // §3.5ב (calev PARTIAL, ממצא 1 — DoD#13): הגרסה הקודמת זיהתה את שתי
+  // האפשרויות לפי טקסט מרונדר (/device storage/i, /app storage/i) — טקסט
+  // מתורגם ⇒ בכל locale שאינו אנגלית (43 מתוך 44 בבורר-השפה, שיושב על המסך
+  // הראשון) הגידור **לא חל בכלל**: "אחסון במכשיר" נשאר גלוי ונבחר, בדיוק
+  // הכשל השקט ש-DoD#1 נועד למנוע. עוגן חדש: **סדר-DOM**, לא טקסט.
+  // vendor/obsidian-mobile/app.js בונה את קבוצת-המיקום תמיד
+  // `.addOption("external", …).addOption("app", …)` — באותו סדר בשני
+  // המימושים (מסך ה-onboarding הראשוני `hte`, ומודל "Create new vault" `w`;
+  // אומת ידנית בבאנדל, לא רק בטקסט-מתורגם) — כך שהילד-הראשון של
+  // `.mobile-onboarding-radio-group` הוא תמיד "Device storage" והשני תמיד
+  // "App storage", ללא קשר לשפה. קבוצת-רדיו אחרת עם אותה מחלקה (למשל מסך
+  // ההצפנה custom/managed) יכולה תיאורטית "להזדמן" לאותו class name — כדי
+  // לא לפגוע בה בטעות, מגבילים את החיפוש ל-radio-group שנמצא **באותו screen**
+  // שגם מרנדר input[type=text] (שם ה-vault) — בדיוק אותו עוגן-מבנה
+  // ש-installCreateVaultInterceptor למעלה משתמש בו לזהות את מסך היצירה
+  // האמיתי, ומאותה סיבה (ה-controller מנתק (detach) כל מסך קודם ב-goTo(),
+  // כך שרק מסך אחד מחובר בפועל בכל רגע — אין דליפה בין שלבים).
   function installExternalStorageGate() {
     if ('showDirectoryPicker' in window) return;
     function gate() {
-      var options = document.querySelectorAll('.mobile-onboarding-radio-option');
-      if (!options.length) return;
-      var externalOpt = null, appOpt = null;
-      for (var i = 0; i < options.length; i++) {
-        var titleEl = options[i].querySelector('.mobile-onboarding-radio-option-title');
-        var title = (titleEl && titleEl.textContent) || '';
-        if (/device storage/i.test(title)) externalOpt = options[i];
-        else if (/app storage/i.test(title)) appOpt = options[i];
-      }
-      if (!externalOpt || externalOpt.__owGated) return;   // idempotent — כבר טופל
-      externalOpt.__owGated = true;
-      var wasSelected = externalOpt.classList.contains('is-selected');
-      externalOpt.style.display = 'none';
-      if (wasSelected && appOpt) appOpt.click();   // מפעיל את ste.setValue הנייטיב
-      // הסבר (DoD#1: "מוסתרת... עם הסבר") — פעם אחת פר radio-group.
-      var group = externalOpt.parentNode;
-      if (group && group.parentNode && !group.parentNode.querySelector('.ow-external-gate-note')) {
-        var note = document.createElement('div');
-        note.className = 'ow-external-gate-note';
-        note.style.cssText = 'font-size:12px;opacity:.7;margin:4px 0 0;';
-        note.textContent = 'אחסון חיצוני אינו זמין בדפדפן זה — משתמשים באחסון פנימי (App storage).';
-        group.parentNode.insertBefore(note, group.nextSibling);
+      var screens = document.querySelectorAll('.mobile-onboarding, .mobile-vault-chooser-screen');
+      for (var s = 0; s < screens.length; s++) {
+        var screen = screens[s];
+        if (!screen.querySelector('input[type="text"]')) continue;   // לא מסך-הגדרת-vault
+        var groups = screen.querySelectorAll('.mobile-onboarding-radio-group');
+        for (var g = 0; g < groups.length; g++) {
+          var options = groups[g].querySelectorAll('.mobile-onboarding-radio-option');
+          if (options.length < 2) continue;   // לא קבוצת device/app storage (2 אפשרויות תמיד)
+          var externalOpt = options[0], appOpt = options[1];   // סדר addOption() בבאנדל — לא טקסט
+          if (externalOpt.__owGated) continue;   // idempotent — כבר טופל
+          externalOpt.__owGated = true;
+          var wasSelected = externalOpt.classList.contains('is-selected');
+          externalOpt.style.display = 'none';
+          if (wasSelected) appOpt.click();   // מפעיל את ste.setValue הנייטיב
+          // הסבר (DoD#1: "מוסתרת... עם הסבר") — פעם אחת פר radio-group.
+          // §3.5א: אנגלית — הקהל (§0) הוא r/ObsidianMD, ממשק אנגלי.
+          var group = groups[g];
+          if (group.parentNode && !group.parentNode.querySelector('.ow-external-gate-note')) {
+            var note = document.createElement('div');
+            note.className = 'ow-external-gate-note';
+            note.style.cssText = 'font-size:12px;opacity:.7;margin:4px 0 0;';
+            note.textContent = 'External storage isn\'t available in this browser — using internal storage instead.';
+            group.parentNode.insertBefore(note, group.nextSibling);
+          }
+        }
       }
     }
     gate();
@@ -1114,7 +1158,10 @@ const MOBILE_SCRIPTS = [
     // every other verify failure (local/folder/real-server 404) is
     // untouched, no regression (DoD#5: runtime-server never sets
     // __owBackend, so this branch is unreachable there).
-    var humanErr = new Error('הכספת הזו לא נמצאת במכשיר הזה — כספות נשמרות מקומית בדפדפן');
+    // §3.5א (calev PARTIAL, ממצא 3): §3.2 המקורי הכתיב את הנוסח בעברית —
+    // טעות, שכן זו בדיוק ההודעה שמבקר-r/ObsidianMD (§0, ממשק אנגלי) רואה
+    // אחרי לחיצה על לינק משותף. §3.5א גובר.
+    var humanErr = new Error('This vault isn\'t on this device — vaults are stored locally in the browser.');
     humanErr.owHuman = true;
     verifyPromise = Promise.reject(humanErr);
   } else {
