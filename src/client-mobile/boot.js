@@ -1075,6 +1075,22 @@ const MOBILE_SCRIPTS = [
       window.__owFolderRoot = h;                                 // רק אחרי granted
       return { isDirectory: true };
     })();
+  } else if (window.__owBackend === 'none') {
+    // §3.2 — VAULT_TYPE fell back to 'server' because VAULT_ID isn't in the
+    // local registry: an unrecognized deep-link (shared link, wiped
+    // storage, different device — exactly the r/ObsidianMD scenario, §0).
+    // window.__owBackend==='none' is a client-only BUILD (injected only by
+    // the CF build, see index.html/build-assets.sh) — there is no /api/fs to
+    // ask, so skip the fetch entirely (DoD#4: zero network request) and fail
+    // with a human message (DoD#3) instead of the raw "Error: ... (HTTP
+    // 404)" below. err.owHuman marks this for the shared .catch handler
+    // (below) so ONLY this message skips the generic "Error: " prefix —
+    // every other verify failure (local/folder/real-server 404) is
+    // untouched, no regression (DoD#5: runtime-server never sets
+    // __owBackend, so this branch is unreachable there).
+    var humanErr = new Error('הכספת הזו לא נמצאת במכשיר הזה — כספות נשמרות מקומית בדפדפן');
+    humanErr.owHuman = true;
+    verifyPromise = Promise.reject(humanErr);
   } else {
     verifyPromise = fetch('/api/fs/stat?vault=' + encodeURIComponent(VAULT_ID) + '&path=')
       .then(function (res) {
@@ -1341,7 +1357,11 @@ const MOBILE_SCRIPTS = [
     })
     .catch(function(err) {
       console.warn('[obsidian-web] vault check failed:', err.message);
-      setStatus('Error: ' + err.message);
+      // §3.2 DoD#3: the unrecognized-deep-link message (owHuman, above) is
+      // already a full human sentence — no "Error: (HTTP ...)" framing.
+      // Every other verify failure (local/folder/real-server 404) keeps the
+      // existing "Error: <message>" wording unchanged — no regression.
+      setStatus(err.owHuman ? err.message : ('Error: ' + err.message));
       localStorage.removeItem('obsidian-web:lastVaultId');
       setTimeout(function(){ location.href = '/starter'; }, 2000);
     });
