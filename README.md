@@ -6,7 +6,7 @@ Run Obsidian in a standard browser — no Electron, no native app needed.
 your own browser (OPFS), nothing is stored on any server, and nothing is shared between visitors.
 See "Two deployment modes" below.
 
-obsidian-web loads Obsidian's original renderer (`app.js`) completely unmodified and replaces every Node.js / Capacitor / Electron dependency it depends on with lightweight browser-compatible shims. The result is real Obsidian running in any modern browser.
+obsidian-web loads Obsidian's original renderer (`app.js`, extracted from the official Android app) with only four small, documented build-time patches (`scripts/patch-obsidian-mobile.js`) — see "Mobile bundle" below — and replaces every Node.js / Capacitor / Electron dependency it depends on with lightweight browser-compatible shims. The result is real Obsidian running in any modern browser.
 
 ### What works
 

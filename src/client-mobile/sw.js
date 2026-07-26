@@ -142,8 +142,8 @@ function owresRpcRead(vaultId, relPath) {
     });
   }).then((msg) => ({
     // File-like surface (name/size/slice/getFile not needed — buildOwResResponse
-    // only touches .size + .slice()), so buildOwResResponse works unmodified
-    // for either an OPFS `File` or this RPC result.
+    // only touches .size + .slice()), so buildOwResResponse works as-is,
+    // without any changes, for either an OPFS `File` or this RPC result.
     size: msg.buffer.byteLength,
     slice: (start, end) => msg.buffer.slice(start, end),
   }));

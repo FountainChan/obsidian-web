@@ -4,8 +4,8 @@
 // this sandbox (hangs even on a trivial Worker — known environment gap, see
 // dev/docs/walkthrough.md:840 "אין לנו CF deploy מקומי"). Bun implements
 // fetch/Request/Response/btoa/atob/URL to the same spec as workerd, so
-// `handleProxy`/`isAllowed`/`bytesToB64`/`b64ToBytes` run unmodified under
-// `bun test`, against the REAL network (GitHub/obsidian.md — no mocking of
+// `handleProxy`/`isAllowed`/`bytesToB64`/`b64ToBytes` run as-is (no source
+// changes) under `bun test`, against the REAL network (GitHub/obsidian.md — no mocking of
 // the outbound fetch itself). See brief §0 "Testing strategy — מעודכן".
 //
 // Run: bun test src/deployments/cloudflare/test/proxy-worker.test.js
