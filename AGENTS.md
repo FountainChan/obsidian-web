@@ -20,11 +20,14 @@ See `docs/architecture.md` for the full picture.
 ## Conventions — required
 
 - **Node 18+ or Bun — depends on the package.** Most packages' scripts invoke `node`
-  (`src/client-mobile` tests, `src/runtime-server/server`, the Cloudflare deployment's
-  build script). `src/sync-server` is the one package that runs on `bun`
-  (`bun index.js` / `bun test`). The maintainer's own dev environment symlinks `node`
-  to `bun`, which is a local habit, not a repo-wide requirement — don't assume `bun`
-  works for every package.
+  (`src/client-mobile` tests, `src/runtime-server/server`, and the Cloudflare deployment's
+  *build* script, `build-assets.sh`). `src/sync-server` runs entirely on `bun`
+  (`bun index.js` / `bun test`) — but it is **not** the only package that needs `bun`:
+  the Cloudflare deployment's own *test suite* (`src/deployments/cloudflare/test/`,
+  `npm test`) also requires `bun` (`bun test`), even though that package's build is
+  `bash` + `node`. The maintainer's own dev environment symlinks `node` to `bun`, which
+  is a local habit, not a repo-wide requirement — don't assume `bun` works for every
+  package's *build*, and don't assume `node` alone covers every package's *tests*.
 - **`vendor/` is gitignored.** It holds Obsidian's own bundle, generated locally by
   `scripts/update-obsidian-*.js`, and is never committed. This repository does not
   contain or distribute that bundle — each user downloads Obsidian themselves via the
