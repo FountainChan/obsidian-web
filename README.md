@@ -140,7 +140,7 @@ node scripts/update-obsidian-mobile.js
 node scripts/update-obsidian-mobile.js --version 1.12.7
 ```
 
-This script downloads the official APK, unpacks the `assets/public/` tree to `vendor/obsidian-mobile/`, and **applies four build-time patches** to `vendor/obsidian-mobile/app.js` (via `scripts/patch-obsidian-mobile.js`) that expose `window.__owPlatform`, merge `window.__owPlatformOverrides`, and surface the desktop-layout vault profile panel. If a patch fails to match, the script aborts loudly — that's our signal that the Obsidian minifier changed.
+This script downloads the official APK, unpacks the `assets/public/` tree to `vendor/obsidian-mobile/`, and **applies four build-time patches** to `vendor/obsidian-mobile/app.js` (via `scripts/patch-obsidian-mobile.js`): two expose internal platform flags (`window.__owPlatform`, `window.__owPlatformOverrides`) so the shims can read/override them, and two adjust rendering for a desktop-style layout — gating the `is-mobile` body class, and surfacing the vault-profile panel that the mobile bundle otherwise hides. If a patch fails to match, the script aborts loudly — that's our signal that the Obsidian minifier changed.
 
 | Runtime URL | Updater |
 |---|---|
