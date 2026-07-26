@@ -125,6 +125,17 @@
   <!-- OW_CONFIG_INJECT -->
   <script src="/client-mobile/deploy-config.js?v=1"></script>
 
+  <!-- 3e. Platform bridge (docs/plans/runtime-platform-descriptors.md §2/§3) —
+       wraps Object.defineProperty to capture Obsidian's Platform object at
+       runtime, replacing 3 of the 4 build-time patches on
+       vendor/obsidian-mobile/app.js. MUST load before boot.js: boot.js sets
+       window.__owPlatformOverrides synchronously at its top level, and the
+       bridge reads that lazily (only once it captures Platform, which
+       happens much later, after app.js is injected) — see brief §3.0 for
+       the full load-order diagram. Classic script (not type="module") —
+       index.html only supports classic scripts here (brief §3.7#9). -->
+  <script src="/client-mobile/platform-bridge.js?v=1"></script>
+
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected
        DYNAMICALLY by boot.js after vault verification — same mechanism as

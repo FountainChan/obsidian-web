@@ -1,0 +1,106 @@
+'use strict';
+
+/**
+ * Unit tests for platform-bridge.js's pure decision logic (docs/plans/
+ * runtime-platform-descriptors.md §4 Commit 1, §3.7#8).
+ *
+ * The actual interception (Object.defineProperty wrapping, the
+ * queueMicrotask candidate queue, Element.prototype.addClass wrapping) needs
+ * `window`/`document`/a live webpack bundle and is NOT testable under
+ * node:test (no DOM) — see brief §5 DoD#12. Those paths are verified in a
+ * real browser by calev. This file covers only the pieces that don't touch
+ * window/document: shape validation (§3.1), `want` computation from
+ * __owPlatformOverrides + EmulateMobile (§3.0/§3.5), and the addClass-wrap
+ * condition (§3.3) — the exact logic the brief calls out as having burned
+ * three review rounds when gotten wrong.
+ */
+
+const assert = require('assert/strict');
+const test = require('node:test');
+const bridge = require('../platform-bridge');
+
+// ── isValidShape (§3.1 — "must be enforced", spike defect #1: computed but not enforced) ──
+
+test('isValidShape accepts an object with both isMobileApp and canPinSidebar', () => {
+  assert.equal(bridge.isValidShape({ isMobileApp: true, canPinSidebar: false }), true);
+});
+
+test('isValidShape rejects an object missing isMobileApp (foreign Platform-shaped object)', () => {
+  assert.equal(bridge.isValidShape({ canPinSidebar: false }), false);
+});
+
+test('isValidShape rejects an object missing canPinSidebar', () => {
+  assert.equal(bridge.isValidShape({ isMobileApp: true }), false);
+});
+
+test('isValidShape rejects undefined (getter not ready yet — the common case, §3.1)', () => {
+  assert.equal(bridge.isValidShape(undefined), false);
+});
+
+test('isValidShape rejects null and non-objects', () => {
+  assert.equal(bridge.isValidShape(null), false);
+  assert.equal(bridge.isValidShape('Platform'), false);
+  assert.equal(bridge.isValidShape(42), false);
+});
+
+// ── computeWant (§3.0 fallback + §3.5 EmulateMobile precedence) ──
+
+test('computeWant returns null when __owPlatformOverrides is missing — brief §3.0 fallback: "do not lock anything"', () => {
+  assert.equal(bridge.computeWant(undefined, null), null);
+  assert.equal(bridge.computeWant(null, null), null);
+});
+
+test('computeWant returns null for a non-object overrides value', () => {
+  assert.equal(bridge.computeWant('nope', null), null);
+});
+
+test('computeWant mirrors isMobile/isDesktop from overrides and always locks isMobileApp:true (§3.2, never derived)', () => {
+  const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true, isPhone: false, isTablet: false, isDesktopApp: false }, null);
+  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
+});
+
+test('computeWant with mobile-layout overrides', () => {
+  const want = bridge.computeWant({ isMobile: true, isDesktop: false, isMobileApp: true }, null);
+  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false });
+});
+
+test('computeWant: EmulateMobile (truthy localStorage value) wins over __owPlatformOverrides — brief §3.5 "קדימות"', () => {
+  const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '1');
+  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false });
+});
+
+test('computeWant: EmulateMobile is checked by truthiness of the raw value, not mere key existence (mirrors upstream Zee guard)', () => {
+  // localStorage.getItem returns the string "" for an empty value, which is falsy —
+  // must NOT be treated as "emulate active".
+  const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '');
+  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
+});
+
+// ── shouldWrapAddClass (§3.3 — "the exact condition, all three caveats folded in") ──
+
+test('shouldWrapAddClass is true when want is valid and isMobile is false (desktop layout — must suppress the unconditional addClass)', () => {
+  assert.equal(bridge.shouldWrapAddClass({ isMobile: false, isMobileApp: true, isDesktop: true }), true);
+});
+
+test('shouldWrapAddClass is false when want is valid and isMobile is true (mobile layout — nothing to suppress)', () => {
+  assert.equal(bridge.shouldWrapAddClass({ isMobile: true, isMobileApp: true, isDesktop: false }), false);
+});
+
+test('shouldWrapAddClass is false when want is null — the §3.0 trap: on an empty object !want.isMobile is true, which would wrongly wrap', () => {
+  assert.equal(bridge.shouldWrapAddClass(null), false);
+});
+
+// ── constants exist and are sane (named, not magic — §3.7 defect #5) ──
+
+test('exposes named, positive tick/time budgets instead of magic numbers', () => {
+  assert.equal(typeof bridge.CAPTURE_TICK_CEILING, 'number');
+  assert.ok(bridge.CAPTURE_TICK_CEILING > 0);
+  assert.equal(typeof bridge.GLOBAL_SAFETY_NET_MS, 'number');
+  assert.ok(bridge.GLOBAL_SAFETY_NET_MS > 0);
+  assert.equal(typeof bridge.ADDCLASS_SAFETY_NET_MS, 'number');
+  assert.ok(bridge.ADDCLASS_SAFETY_NET_MS > 0);
+});
+
+test('locks exactly the three permitted flags — isMobile, isMobileApp, isDesktop (§3.2) — never isPhone/isTablet/isDesktopApp', () => {
+  assert.deepEqual(bridge.LOCKED_FLAGS.slice().sort(), ['isDesktop', 'isMobile', 'isMobileApp']);
+});
