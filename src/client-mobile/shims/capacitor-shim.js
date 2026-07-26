@@ -472,7 +472,29 @@
     // e.contains('/') routes to the External fs instance) AND our own
     // owResolveNativeVaultId() both parse it consistently.
     async choose() {
-      if (!('showDirectoryPicker' in window)) throw capError('UNSUPPORTED', 'canceled: not supported');
+      if (!('showDirectoryPicker' in window)) {
+        // §3.5ג (calev PARTIAL, ממצא 2 — DoD#14): boot.js's own .catch (the
+        // interceptor's "Create a vault" path) only covers ITS OWN call to
+        // this method. The bundle has a SECOND call site to the exact same
+        // plugin method — "Use my existing vault" → "On this device" →
+        // choose-folder (vendor/obsidian-mobile/app.js, screen `kte`) —
+        // which awaits Filesystem.choose() directly with no .catch of its
+        // own; the UNSUPPORTED rejection there used to land in the console
+        // only (verified: real Firefox, zero user-visible feedback, screen
+        // doesn't move). Notifying HERE, at the single shared entry point
+        // every caller goes through, fixes both call sites at once without
+        // touching the (minified, unpatched) bundle — consistent with
+        // AGENTS.md's "prefer a shim over a patch" guidance. Not a double
+        // Notice for our OWN call site: the logic gate in
+        // installCreateVaultInterceptor (boot.js) already forces
+        // location_='app' whenever showDirectoryPicker is absent, so THIS
+        // branch is unreachable from our own interceptor on such browsers —
+        // only the bundle's own, un-gated call site ever reaches it.
+        if (typeof window.Notice === 'function') {
+          new window.Notice('External storage isn\'t supported in this browser — using internal storage instead.');
+        }
+        throw capError('UNSUPPORTED', 'canceled: not supported');
+      }
       let dir;
       try {
         dir = await window.showDirectoryPicker({ mode: 'readwrite' });
