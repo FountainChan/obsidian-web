@@ -35,7 +35,10 @@ function makeFakeStore(initialFiles) {
 
 const EXAMPLE_FILES = [
   ['.obsidian/app.json', '{"legacyEditor":false}'],
-  ['.obsidian/community-plugins.json', '["dataview","templater-obsidian"]'],
+  // Mirrors the real template.js content (demo-and-docs-truth §3.5-ב):
+  // templater-obsidian was removed from the list — never installed, never
+  // planned. Only dataview remains (and IS genuinely bundled, §3.5-a).
+  ['.obsidian/community-plugins.json', '["dataview"]'],
   ['Welcome.md', '# Welcome'],
   ['How It Works.md', '# How It Works'],
   ['Features/Markdown Showcase.md', '# Markdown Showcase'],
