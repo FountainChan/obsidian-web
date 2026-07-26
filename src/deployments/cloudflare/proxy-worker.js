@@ -163,16 +163,23 @@ function checkRateLimit(ip) {
   if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
     if (rateLimitMap.size >= RATE_LIMIT_MAX_ENTRIES) {
       pruneExpiredRateLimitEntries(now);
-      // Still at/over the cap after pruning (every tracked IP is genuinely
-      // active within the current window) — evict the oldest entry rather
-      // than let the map grow further. Map iteration order is insertion
-      // order, so keys().next() is the oldest surviving entry.
-      if (rateLimitMap.size >= RATE_LIMIT_MAX_ENTRIES) {
-        const oldestKey = rateLimitMap.keys().next().value;
-        rateLimitMap.delete(oldestKey);
-      }
     }
-    rateLimitMap.set(ip, { count: 1, windowStart: now });
+    // §3.6ב (calev-heavy NO-GO round 2, finding 3): the old code fell back to
+    // evicting `rateLimitMap.keys().next().value` — the OLDEST entry — when
+    // pruning didn't free enough room. Oldest-by-insertion-order is NOT the
+    // same as "expired": a currently-throttled IP that has been hammering
+    // the proxy is exactly the kind of entry that stays oldest-and-live the
+    // longest, so a flood of ~RATE_LIMIT_MAX_ENTRIES distinct new IPs could
+    // evict it and hand it a free reset of its own 429 (measured: 10,001
+    // distinct IPs bought back a throttled IP's counter). Never evict a
+    // live (non-expired) entry — if the cap is still full after pruning
+    // truly-expired ones, this new IP just goes untracked for this one
+    // request (best-effort limiter, not a hard quota — see README Known
+    // gaps). Memory stays bounded either way: we simply stop inserting once
+    // at the cap, we don't evict to make room.
+    if (rateLimitMap.size < RATE_LIMIT_MAX_ENTRIES) {
+      rateLimitMap.set(ip, { count: 1, windowStart: now });
+    }
     return true;
   }
   entry.count += 1;

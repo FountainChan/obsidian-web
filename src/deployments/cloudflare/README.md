@@ -102,7 +102,9 @@ delete `template.js`.
   it used to call `Filesystem.mkdir()` and hit the non-existent `/api/fs/mkdir`
   here (always failing with "mkdir failed: ..."), since `window.__owVaultType`
   still defaulted to `'server'` at that point in boot. Fixed at two layers —
-  a DOM click-interceptor (`boot.js:577-641`, `installCreateVaultInterceptor`)
+  a DOM click-interceptor (`boot.js`, `installCreateVaultInterceptor` —
+  anchor on the function name, not a line range: it has grown since this
+  paragraph was first written, per AGENTS.md "never to a line number")
   that routes the click straight to an OPFS/folder vault creation, and an
   FS-level safety net (`shims/capacitor-shim.js:291-313`) that catches the
   same case if the DOM interceptor is ever bypassed. Verified on this
@@ -116,13 +118,17 @@ delete `template.js`.
    would fix this but needs an account-level binding (out of scope for a
    code-only slice); the current approach is deliberately "enough against
    gross abuse," not a hard guarantee. The per-isolate counter map is capped
-   at 10,000 distinct IPs (oldest entry evicted past the cap) and prunes
-   expired entries opportunistically, so a burst of distinct attacker IPs
-   can't grow it without bound within one isolate's lifetime — this bounds
-   memory, it does not make the limiter precise. The window is fixed
-   (not sliding), so a client can legitimately send close to double the
-   per-minute limit across a window boundary; a `429` response includes
-   `Retry-After: 60` either way.
+   at 10,000 distinct IPs and prunes expired entries opportunistically, so a
+   burst of distinct attacker IPs can't grow it without bound within one
+   isolate's lifetime — this bounds memory, it does not make the limiter
+   precise. Past the cap, once opportunistic pruning has removed every
+   entry it can, a new IP simply goes untracked for that one request rather
+   than evicting an existing one — an earlier version evicted the oldest
+   entry unconditionally, which could be a currently-throttled IP, handing
+   an attacker a way to reset their own `429` by flooding enough new IPs
+   through the same isolate. The window is fixed (not sliding), so a client
+   can legitimately send close to double the per-minute limit across a
+   window boundary; a `429` response includes `Retry-After: 60` either way.
 2. Two font files referenced by `obsidian-mobile/app.css` ("Inter",
    `public/fonts/*.woff2`) 404 — `vendor/obsidian-mobile` never included a
    `public/` dir. Cosmetic only (`font-display: swap` → system font fallback);

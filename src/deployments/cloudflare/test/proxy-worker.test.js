@@ -459,4 +459,47 @@ describe('rate limiting (§3.3)', () => {
     expect(last.status).toBe(429);
     expect(last.headers.get('Retry-After')).toBe('60');
   });
+
+  // ── §3.6ב (calev-heavy NO-GO round 2, finding 3) ────────────────────────────
+  // The old eviction path evicted `rateLimitMap.keys().next().value` — the
+  // oldest entry by insertion order — whenever the cap was still full after
+  // pruning. A currently-throttled IP (still very much "live", not expired)
+  // stays in the map and, if it was one of the earliest entries inserted, is
+  // exactly the oldest surviving one — so a flood of new distinct IPs could
+  // evict IT and hand it back a fresh 200. Regression test: throttle one IP,
+  // then push the map to its cap with brand-new IPs, then confirm the
+  // throttled IP is STILL throttled — its entry must never be evicted just
+  // to make room for someone else, only pruning of truly-expired entries may
+  // free space.
+  test('DoD#16 / §3.6ב: a throttled IP stays throttled even when the cap is filled by other IPs', async () => {
+    __setRateLimitMaxEntriesForTest(2);
+    try {
+      // Throttle 90.0.0.1 — 31 requests within the same (real, un-mocked)
+      // clock tick trips the 30/minute limit.
+      let last;
+      for (let i = 0; i < 31; i++) {
+        last = await handleProxy(postRequestFromIp('90.0.0.1', { url: 'https://evil.com/x' }), makeCtx());
+      }
+      expect(last.status).toBe(429);
+
+      // Map is now { 90.0.0.1 } (size 1, cap 2). One more distinct IP fills
+      // the cap exactly (size 2); a further one used to force an eviction.
+      await handleProxy(postRequestFromIp('90.0.0.2', { url: 'https://evil.com/x' }), makeCtx());
+      expect(__getRateLimitMapSizeForTest()).toBe(2);
+      await handleProxy(postRequestFromIp('90.0.0.3', { url: 'https://evil.com/x' }), makeCtx());
+      // Cap still 2 — 90.0.0.3 went untracked rather than evicting anyone
+      // (nothing here has expired: RATE_LIMIT_WINDOW_MS is 60s, this test
+      // runs in milliseconds).
+      expect(__getRateLimitMapSizeForTest()).toBe(2);
+
+      // The decisive assertion: 90.0.0.1's throttle must have survived —
+      // its counter was never reset by the eviction that used to happen
+      // when 90.0.0.3 arrived at a full cap.
+      const stillThrottled = await handleProxy(
+        postRequestFromIp('90.0.0.1', { url: 'https://evil.com/x' }), makeCtx());
+      expect(stillThrottled.status).toBe(429);
+    } finally {
+      __setRateLimitMaxEntriesForTest(10000);
+    }
+  });
 });
