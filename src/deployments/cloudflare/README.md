@@ -10,8 +10,11 @@ previous server-side in-memory vault store (internally named `VaultDO`) has been
 - Serves the **static app bundle** (`env.ASSETS`) for everything except
   `/api/proxy-request` and the `/starter`/`/vault/*` SPA-fallback routes. See `index.js`.
 - `/` renders **Obsidian's native mobile onboarding screen** ("Create a vault" /
-  "Use my existing vault") — no vault is opened automatically, the chooser starts
-  empty. It also gets a **"כספת דמו" (demo vault) button** injected
+  "Use my existing vault") — **on a first visit**, no vault is opened automatically and
+  the chooser starts empty. A **returning** visitor who already has a local vault is
+  redirected straight into it (`/vault/<id>`), skipping onboarding entirely — see
+  "Example / demo vault content" below for the demo vault's fixed id. It also gets a
+  **"כספת דמו" (demo vault) button** injected
   (`installDemoVaultButton` in `boot.js`) that creates/opens a fixed-id local
   (OPFS) vault and seeds it with `template.js`'s example content on first open —
   see "Example / demo vault content" below. Vault creation/writes/reads happen
@@ -54,8 +57,9 @@ to fetching this file when the API route 404s. Currently three entries:
 - **`obsidian-livesync`** (`enabled:false`) — [Self-hosted
   LiveSync](https://github.com/vrtmrz/obsidian-livesync), MIT-licensed.
 - **`dataview`** (`enabled:true`) — [Dataview](https://github.com/blacksmithgu/obsidian-dataview),
-  MIT-licensed. Backs the demo's "Dataview Queries" **and** "Tags" notes — without this, the
-  ` ```dataview ` blocks in both notes render as plain code, not live queries.
+  MIT-licensed. Backs the demo's "Dataview Queries", "Tags", **and** "Links and Backlinks"
+  notes — without this, the ` ```dataview ` blocks in all three notes render as plain code,
+  not live queries.
 
 The latter two are **downloaded from GitHub at build time** (`node
 scripts/install-plugin.js --repo <owner/name> --dest <id>`, called once per
@@ -109,9 +113,9 @@ delete `template.js`.
   default; the user opts in via Settings → Community plugins. See "System
   plugins" above.
 - **Dataview preinstalled, enabled** (`demo-and-docs-truth` §3.5-a) — the
-  demo vault's "Dataview Queries" **and** "Tags" notes run live queries out of the box
-  (the latter replaced a static, self-contradicting table — §3.6 finding, calev round 3).
-  See "System plugins" above.
+  demo vault's "Dataview Queries", "Tags", **and** "Links and Backlinks" notes run live
+  queries out of the box (the latter two each replaced a static, self-contradicting list —
+  §3.6 finding calev round 3, §3.8ג finding calev round 4). See "System plugins" above.
 - Native "**Create a vault**" button (mobile onboarding UI) works end-to-end:
   it used to call `Filesystem.mkdir()` and hit the non-existent `/api/fs/mkdir`
   here (always failing with "mkdir failed: ..."), since `window.__owVaultType`

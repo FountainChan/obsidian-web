@@ -42,7 +42,7 @@ src/
      server/               Node: /api/fs, watch, bootstrap
      client-shims/         ענף ה-HTTP backend + shims ייחודיים-לשרת
   deployments/
-     cloudflare/           serverless (static + _worker.js)   ← ברירת-מחדל
+     cloudflare/           serverless (static + index.js Worker)   ← ברירת-מחדל
      server/               פריסת-שרת (Docker option + node option)
 ```
 

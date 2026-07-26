@@ -238,9 +238,7 @@ Obsidian's killer feature — bidirectional links between notes.
 
 Open this note and click the **backlinks icon** in the right sidebar. You'll see every note that links here.
 
-Notes linking to this page — computed live, not hand-typed (a static list here would go stale the
-moment a link changes anywhere in the vault, same reasoning as the "Tags in This Vault" queries in
-[[Features/Tags]]):
+Notes linking to this page — computed live, not hand-typed (a static list here would go stale the moment a link changes anywhere in the vault, same reasoning as the "Tags in This Vault" queries in [[Features/Tags]]):
 
 \`\`\`dataview
 LIST
@@ -282,9 +280,7 @@ Nested tags appear as a hierarchy in the tag pane.
 
 ## Tags in This Vault
 
-A static table here would go stale the moment a tag changes anywhere in the vault — these
-[[Features/Dataview Queries|Dataview]] queries compute it live instead. (Labels below use
-\`#tagname\`-in-backticks, same as "Inline Tags" above, so the label itself doesn't become a tag.)
+A static table here would go stale the moment a tag changes anywhere in the vault — these [[Features/Dataview Queries|Dataview]] queries compute it live instead. (Labels below use \`#tagname\`-in-backticks, same as "Inline Tags" above, so the label itself doesn't become a tag.)
 
 \`#demo\`
 \`\`\`dataview
