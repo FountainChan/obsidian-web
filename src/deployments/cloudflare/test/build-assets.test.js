@@ -27,11 +27,21 @@
 // duration — the server could never accept the build's HTTP requests,
 // deadlocking the child process against its own parent. Async exec keeps
 // the event loop free to service the mock server while the child runs.
+//
+// OW_VENDOR_PLUGINS_DIR redirects scripts/install-plugin.js's writes to a
+// throwaway temp dir (demo-and-docs-truth round 5, calev finding 7): without
+// it, this test runs the REAL build-assets.sh against the REAL, configured
+// plugin ids ("dataview", "obsidian-livesync") and installPlugin() would
+// write their mock (v0.0.0-mock) files straight into vendor/plugins/ —
+// which is a symlink shared by every git worktree of this repo, so a test
+// run in one worktree would corrupt vendor/plugins/dataview and
+// vendor/plugins/obsidian-livesync in every sibling worktree too.
 
 import { expect, test } from 'bun:test';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { startMockGithubServer } from './fixtures/mock-github-server.js';
@@ -46,14 +56,16 @@ const CONFIG_PATH = path.join(MAIN_DIR, 'src', 'config', 'deploy-config.json');
 
 test('build-assets.sh: plugins install/enabled follow config.json + index.html gets window.__owConfigInjected before deploy-config.js', async () => {
   const mock = await startMockGithubServer();
+  const vendorPluginsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-vendor-plugins-'));
   try {
     await execFileAsync('bash', ['scripts/build-assets.sh'], {
       cwd: CF_DIR,
       timeout: 120000,
-      env: { ...process.env, OW_GITHUB_API_BASE: mock.baseUrl },
+      env: { ...process.env, OW_GITHUB_API_BASE: mock.baseUrl, OW_VENDOR_PLUGINS_DIR: vendorPluginsDir },
     });
   } finally {
     await mock.close();
+    fs.rmSync(vendorPluginsDir, { recursive: true, force: true });
   }
 
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -116,6 +128,7 @@ test('build-assets.sh: fails loudly (non-zero exit) when an install:true plugin 
   // §3.7, calev NO-GO round 3, finding 5 — no longer reachable once neither
   // plugin depends on a real, shared rate limit).
   const mock = await startMockGithubServer();
+  const vendorPluginsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-vendor-plugins-'));
   let threw = false;
   let status;
   let stderr = '';
@@ -123,7 +136,12 @@ test('build-assets.sh: fails loudly (non-zero exit) when an install:true plugin 
     await execFileAsync('bash', ['scripts/build-assets.sh'], {
       cwd: CF_DIR,
       timeout: 120000,
-      env: { ...process.env, OW_GITHUB_API_BASE: mock.baseUrl, SEED_DATAVIEW_VERSION: '99.99.99-does-not-exist' },
+      env: {
+        ...process.env,
+        OW_GITHUB_API_BASE: mock.baseUrl,
+        SEED_DATAVIEW_VERSION: '99.99.99-does-not-exist',
+        OW_VENDOR_PLUGINS_DIR: vendorPluginsDir,
+      },
     });
   } catch (err) {
     threw = true;
@@ -131,6 +149,7 @@ test('build-assets.sh: fails loudly (non-zero exit) when an install:true plugin 
     stderr = String(err.stderr || '');
   } finally {
     await mock.close();
+    fs.rmSync(vendorPluginsDir, { recursive: true, force: true });
   }
 
   expect(threw).toBe(true);

@@ -74,7 +74,10 @@ async function buildOne(id, cfg, mainDir) {
     const pinnedVersion = (cfg.versionEnv && process.env[cfg.versionEnv]) || undefined;
     try {
       const result = await installPlugin({ repo: cfg.repo, dest: id, version: pinnedVersion });
-      return { srcDir: path.join(mainDir, 'vendor', 'plugins', id), version: result.version };
+      // Use the dir installPlugin() actually wrote to (honors
+      // OW_VENDOR_PLUGINS_DIR — see scripts/install-plugin.js), not a
+      // recomputed vendor/plugins/<id> that would silently diverge from it.
+      return { srcDir: result.dir, version: result.version };
     } catch (err) {
       throw new Error(`plugin "${id}" has install=true but the GitHub download failed: ${err.message}`);
     }

@@ -41,6 +41,17 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 // cloudflare test suite — see test/fixtures/mock-github-server.js). Not
 // meant to be set in normal use; the default is always the real API.
 const GITHUB_REPOS = process.env.OW_GITHUB_API_BASE || 'https://api.github.com/repos';
+// Overridable so tests that run the REAL build-assets.sh against a mock
+// GitHub server (build-assets.test.js) don't write their mock plugin files
+// into the real vendor/plugins/ — `vendor/` is a symlink shared by every
+// git worktree of this repo (demo-and-docs-truth round 5 finding 7: a test
+// in one worktree was overwriting vendor/plugins/dataview and
+// vendor/plugins/obsidian-livesync with 45-byte mock stubs in every sibling
+// worktree too). Not meant to be set in normal use; the default is always
+// the real, shared vendor/plugins/.
+const VENDOR_PLUGINS_DIR = process.env.OW_VENDOR_PLUGINS_DIR
+  ? path.resolve(process.env.OW_VENDOR_PLUGINS_DIR)
+  : path.join(PROJECT_ROOT, 'vendor', 'plugins');
 const USER_AGENT   = 'obsidian-web-installer';
 
 // Required assets that must be present in the release. fail loud if missing.
@@ -260,7 +271,7 @@ async function installPlugin({ repo, dest, version, force, extraData }) {
   if (!dest) throw new Error('installPlugin requires { dest }');
 
   const cacheDir  = path.join(PROJECT_ROOT, '.tmp', 'cache', `${dest}-releases`);
-  const targetDir = path.join(PROJECT_ROOT, 'vendor', 'plugins', dest);
+  const targetDir = path.join(VENDOR_PLUGINS_DIR, dest);
 
   console.log(version ? `Fetching ${repo} release ${version}…` : `Fetching latest ${repo} release…`);
   const release = await fetchRelease(repo, version);
@@ -323,7 +334,10 @@ async function installPlugin({ repo, dest, version, force, extraData }) {
   }
 
   console.log(`\nDone. ${manifest.id || dest} ${pluginVersion} installed to vendor/plugins/${dest}/`);
-  return { version: pluginVersion, files: installedFiles };
+  // `dir` lets callers (build-system-plugins.js) locate the installed files
+  // without recomputing PROJECT_ROOT/vendor/plugins/<dest> themselves — that
+  // recomputation would be wrong whenever OW_VENDOR_PLUGINS_DIR is set.
+  return { version: pluginVersion, files: installedFiles, dir: targetDir };
 }
 
 async function main() {

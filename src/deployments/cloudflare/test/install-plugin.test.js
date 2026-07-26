@@ -14,16 +14,31 @@
 // fast and deterministic (see also demo-and-docs-truth §3.8ג: de-networking
 // the rest of this package's tests).
 
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, afterAll, expect, test } from 'bun:test';
 import https from 'https';
 import { Readable } from 'stream';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+
+// Redirect scripts/install-plugin.js's writes to a throwaway temp dir
+// (demo-and-docs-truth round 5, calev finding 7) — set BEFORE require()ing
+// it, since it reads OW_VENDOR_PLUGINS_DIR once at module load. Without
+// this, the dest dirs below (unique names, cleaned up per-test) would still
+// be created and removed under the real vendor/plugins/, which is a symlink
+// shared by every git worktree of this repo — this test never needs to
+// touch that shared path at all.
+const VENDOR_PLUGINS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ow-vendor-plugins-'));
+process.env.OW_VENDOR_PLUGINS_DIR = VENDOR_PLUGINS_DIR;
+afterAll(() => {
+  fs.rmSync(VENDOR_PLUGINS_DIR, { recursive: true, force: true });
+});
+
 const require = createRequire(import.meta.url);
 const { installPlugin } = require(path.join(REPO_ROOT, 'scripts', 'install-plugin.js'));
 
@@ -77,7 +92,7 @@ function installMockGithub({ withLicense }) {
 }
 
 function cleanup(dest) {
-  fs.rmSync(path.join(REPO_ROOT, 'vendor', 'plugins', dest), { recursive: true, force: true });
+  fs.rmSync(path.join(VENDOR_PLUGINS_DIR, dest), { recursive: true, force: true });
   fs.rmSync(path.join(REPO_ROOT, '.tmp', 'cache', `${dest}-releases`), { recursive: true, force: true });
 }
 
@@ -102,7 +117,7 @@ test('installPlugin succeeds and writes LICENSE when GitHub detects one (regress
   try {
     const result = await installPlugin({ repo: 'fake/repo-with-license', dest });
     expect(result.files).toContain('main.js');
-    expect(fs.existsSync(path.join(REPO_ROOT, 'vendor', 'plugins', dest, 'LICENSE'))).toBe(true);
+    expect(fs.existsSync(path.join(VENDOR_PLUGINS_DIR, dest, 'LICENSE'))).toBe(true);
   } finally {
     cleanup(dest);
   }
