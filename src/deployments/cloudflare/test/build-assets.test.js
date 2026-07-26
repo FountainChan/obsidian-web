@@ -107,7 +107,16 @@ test('build-assets.sh: fails loudly (non-zero exit) when an install:true plugin 
 
   expect(threw).toBe(true);
   expect(status).not.toBe(0);
-  // build-system-plugins.js's thrown Error names the plugin, so a reader of
-  // the failed build's output isn't left guessing which one broke.
-  expect(stderr).toContain('dataview');
+  // build-system-plugins.js's thrown Error names the plugin that failed and
+  // says why — but it must NOT be `dataview` specifically here. Config lists
+  // `obsidian-livesync` before `dataview` (src/config/deploy-config.json),
+  // so under an unrelated GitHub rate limit (real, unauthenticated 60/h),
+  // `obsidian-livesync`'s *unpinned* download can fail first and the build
+  // exits before ever reaching the pinned bad `SEED_DATAVIEW_VERSION` tag
+  // this test forces — the invariant this test guards (any install:true
+  // failure ⇒ non-zero exit) still held, but asserting the specific plugin
+  // name made the test flaky on exactly the failure mode it exists to catch
+  // (demo-and-docs-truth §3.7, calev NO-GO round 3, finding 5). Assert the
+  // shape of the error instead of which plugin triggered it.
+  expect(stderr).toMatch(/has install=true but the GitHub download failed/);
 }, 120000);
