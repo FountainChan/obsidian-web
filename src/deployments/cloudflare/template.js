@@ -10,10 +10,15 @@
  * Note content is kept small. `PLUGIN_FILES` (imported below) is an orphan
  * import from a retired build step — build-assets.sh stubs it to an empty
  * Map before importing this file (see the "example vault content" comment
- * there). The `dataview`/`templater-obsidian` entries in
- * `.obsidian/community-plugins.json` below are not actually seeded either:
- * seed-example-vault.js skips the whole `.obsidian/` subtree so it doesn't
- * clobber the system-plugins config that's seeded separately.
+ * there). The `.obsidian/community-plugins.json` entry below is never
+ * actually seeded verbatim: seed-example-vault.js skips the whole
+ * `.obsidian/` subtree so it doesn't clobber the system-plugins config
+ * that's seeded separately (seed-system-plugins.js merges the *real*
+ * enabled plugins in — see build-system-plugins.js). Dataview genuinely
+ * ships in this deployment (src/config/deploy-config.json,
+ * scripts/install-dataview.js) — the entry here just documents that fact,
+ * it isn't what makes it happen. (Previously this array also listed
+ * `templater-obsidian`, which was never installed or planned — removed.)
  */
 
 import { PLUGIN_FILES } from './plugins-generated.js';
@@ -43,16 +48,15 @@ export const TEMPLATE_FILES = new Map([
 
   ['.obsidian/community-plugins.json', JSON.stringify([
     'dataview',
-    'templater-obsidian',
   ])],
 
   // ── Notes ─────────────────────────────────────────────────────────────────
 
   ['Welcome.md', `# Welcome to Obsidian Web
 
-> **Obsidian's desktop app — running in your browser, no Electron needed.**
+> **Obsidian's own renderer — the same code behind its mobile app — running in your browser, no native shell needed.**
 
-This is a live demo of **obsidian-web**, an open-source project that runs Obsidian's original renderer in a standard browser by replacing every Capacitor/Electron dependency with lightweight browser-native shims.
+This is a live demo of **obsidian-web**, an open-source project that runs Obsidian's mobile renderer in a standard browser by replacing its Capacitor dependencies with lightweight browser-native shims.
 
 **Everything works in the browser:** edit notes, create folders, rename files. Your changes are stored **locally in your browser** (via [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system)) — private to you, never sent to a server, and never reset automatically. They survive a page reload and stick around until you clear this site's browsing data.
 
@@ -94,7 +98,7 @@ This is a live demo of **obsidian-web**, an open-source project that runs Obsidi
 
   ['How It Works.md', `# How It Works
 
-**obsidian-web** runs Obsidian's original renderer code (\`app.js\`) completely unmodified. Instead of forking Obsidian, we replace the Capacitor/Node.js APIs it depends on with browser-compatible shims.
+**obsidian-web** runs Obsidian's original mobile renderer code (\`app.js\`, extracted from the official Android app) almost unmodified — just four small, documented build-time patches (\`scripts/patch-obsidian-mobile.js\`) that expose internal platform flags so the shims below can read/override them. Instead of forking Obsidian, we replace the Capacitor/Node.js APIs it depends on with browser-compatible shims.
 
 ## Architecture
 
@@ -107,7 +111,7 @@ Browser
 ├── client-mobile/storage/
 │   └── opfs-store.js          ← the vault engine backing this demo (OPFS)
 ├── client-mobile/boot.js      ← installs window.require, opens the vault
-└── obsidian-mobile/app.js     ← Obsidian's code, completely untouched
+└── obsidian-mobile/app.js     ← Obsidian's code, patched minimally at build time
 \`\`\`
 
 ## This demo: browser-only storage (OPFS)
@@ -119,8 +123,9 @@ This deployment (Cloudflare Pages + a small edge Worker) does **not** store your
 | **Worker** (\`index.js\`) | Serves the static app bundle. Two exceptions: \`POST /api/proxy-request\` (a CORS-safe proxy so community-plugin installs can reach GitHub) and the \`/starter\`, \`/vault/*\` SPA-fallback routes |
 | **OPFS** | The [Origin Private File System](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system) — a private, sandboxed filesystem the browser gives this site. Your vault's files live there, on your device |
 | **Seed** | On first visit, this demo vault's files are copied into your own OPFS vault once (client-side, \`seed-example-vault.js\`) — after that, it's just your vault |
+| **Plugins** | This demo ships two [community plugins](https://obsidian.md/plugins) — [Dataview](https://github.com/blacksmithgu/obsidian-dataview) (enabled) and [LiveSync](https://github.com/vrtmrz/obsidian-livesync) (installed, disabled) — the same way installing one from inside Obsidian would: downloaded from GitHub at build time, not written by hand. That's what \`POST /api/proxy-request\` above is for |
 
-There is no server-side database, no cross-tab WebSocket sync, and no scheduled reset in this deployment — everything above lives entirely in your browser's OPFS.
+There is no server-side database, no cross-tab WebSocket sync, and no scheduled reset in this deployment — everything about **your vault's data** lives entirely in your browser's OPFS. Installing plugins is the one thing that does talk to the network (GitHub, via the proxy above) — the vault's *contents* still never leave your browser.
 
 ## Fast bootstrap (server-backed mode only)
 
@@ -164,7 +169,7 @@ Everything Obsidian's renderer supports works here — it's the same code.
 - [x] Boot Obsidian in the browser
 - [x] File system shims (Capacitor → OPFS, browser-local)
 - [x] Private per-visitor storage, no server round-trip
-- [ ] Plugin support
+- [x] Community plugin support (this vault ships with Dataview — see [[Features/Dataview Queries]])
 
 ## Code Blocks
 
@@ -191,8 +196,8 @@ const vault = new Map<string, VaultFile>();
 
 ## Blockquote
 
-> Obsidian's renderer runs untouched in the browser.
-> Only the Capacitor/Node.js APIs are replaced with browser-native shims (OPFS in this demo).
+> Obsidian's renderer runs in the browser almost exactly as shipped — a handful of small build-time patches expose platform flags, nothing more.
+> The Capacitor/Node.js APIs it depends on are replaced with browser-native shims (OPFS in this demo).
 
 ## Callouts
 
