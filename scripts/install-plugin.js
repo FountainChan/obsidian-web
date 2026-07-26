@@ -274,15 +274,23 @@ async function installPlugin({ repo, dest, version, force, extraData }) {
   }
 
   // License — mandatory attribution for the MIT-licensed plugins we install
-  // this way. Best-effort: if GitHub genuinely can't detect one, warn and
-  // move on rather than failing the whole build over it.
+  // this way (docs/plans/demo-and-docs-truth.md §3.5-a point 3: "the
+  // attribution is not optional"). This used to be best-effort — warn and
+  // ship anyway when GitHub's repo-license endpoint 404s — which is the
+  // same "guard the action, not the result" gap already closed for main.js
+  // in build-system-plugins.js (a plugin promised via `install:true` must
+  // ship runnable code, not just resolve a download). Missing attribution
+  // is that same gap for the LICENSE file: refuse to ship the plugin at all
+  // rather than silently drop its required notice (calev round 4, finding 6).
   const license = await fetchLicense(repo);
-  if (license) {
-    await fsp.writeFile(path.join(targetDir, 'LICENSE'), license.content, 'utf8');
-    console.log(`  LICENSE              (from ${repo}:${license.path})  →  vendor/plugins/${dest}/LICENSE`);
-  } else {
-    console.warn(`  WARN: could not fetch a LICENSE for ${repo} — shipping without one`);
+  if (!license) {
+    throw new Error(
+      `plugin "${dest}" (${repo}) has no detectable LICENSE on GitHub — ` +
+      'MIT attribution is mandatory for plugins installed this way, refusing to ship without one',
+    );
   }
+  await fsp.writeFile(path.join(targetDir, 'LICENSE'), license.content, 'utf8');
+  console.log(`  LICENSE              (from ${repo}:${license.path})  →  vendor/plugins/${dest}/LICENSE`);
 
   // Read manifest to extract version string.
   const manifestPath = path.join(targetDir, 'manifest.json');
