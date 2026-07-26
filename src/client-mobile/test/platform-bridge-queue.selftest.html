@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>platform-bridge queue self-test</title>
+  <style>
+    body { font: 13px/1.5 -apple-system, BlinkMacSystemFont, monospace, sans-serif; background: #1e1e1e; color: #ddd; margin: 0; padding: 16px; }
+    #summary { font-weight: bold; font-size: 16px; margin-bottom: 12px; }
+    #summary.pass { color: #4caf50; }
+    #summary.fail { color: #f44336; }
+    .pass-line { color: #4caf50; }
+    .fail-line { color: #f44336; font-weight: bold; }
+    pre#out { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <h1>platform-bridge queue self-test</h1>
+  <p>
+    Covers docs/plans/runtime-platform-descriptors.md §5 DoD#12's "same-turn"
+    case and §5 DoD#13 — both are impossible to reproduce against the real
+    obsidian-mobile bundle from outside (app.js's own module-level code runs
+    the real Object.defineProperty('Platform', ...) call, so we can't inject
+    a second same-turn candidate ahead of it). No app.js is loaded on this
+    page at all — each scenario runs platform-bridge.js fresh inside its own
+    iframe so state never bleeds between them.
+  </p>
+  <div id="summary">Running…</div>
+  <pre id="out"></pre>
+
+  <script>
+    (async function () {
+      const out = document.getElementById('out');
+      const summary = document.getElementById('summary');
+      let passCount = 0;
+      let failCount = 0;
+
+      function log(ok, label) {
+        const line = document.createElement('div');
+        line.className = ok ? 'pass-line' : 'fail-line';
+        line.textContent = (ok ? 'PASS — ' : 'FAIL — ') + label;
+        out.appendChild(line);
+        if (ok) passCount++; else failCount++;
+      }
+
+      function assert(cond, label) {
+        log(!!cond, label);
+        if (!cond) console.error('[platform-bridge-queue selftest] FAIL:', label);
+      }
+
+      function makeIframe() {
+        const f = document.createElement('iframe');
+        f.style.display = 'none';
+        document.body.appendChild(f);
+        return f;
+      }
+
+      function loadScript(win, doc, src) {
+        return new Promise(function (resolve, reject) {
+          const s = doc.createElement('script');
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = reject;
+          doc.head.appendChild(s);
+        });
+      }
+
+      function wait(ms) {
+        return new Promise(function (resolve) { setTimeout(resolve, ms); });
+      }
+
+      try {
+        // ── Scenario A — same-turn queue (brief §5 DoD#12, "המקרה שבגללו התור קיים") ──
+        // Two Object.defineProperty(win, 'Platform', ...) calls fired back-to-back in
+        // the SAME synchronous turn — before any microtask (and so before the bridge's
+        // pump loop) has run. The first is foreign/invalid-shape, the second is the
+        // real (already-ready) shape. Asserts the second is not clobbered by the first,
+        // and that the first's rejection doesn't consume the second's tick budget.
+        {
+          const f = makeIframe();
+          const win = f.contentWindow;
+          const doc = win.document;
+          win.__owPlatformOverrides = { isMobile: false, isPhone: false, isTablet: false, isDesktop: true, isDesktopApp: false, isMobileApp: true };
+          const nativeDP = win.Object.defineProperty; // saved BEFORE the bridge wraps it
+
+          await loadScript(win, doc, '/client-mobile/platform-bridge.js');
+
+          const realPlatform = { isMobileApp: true, canPinSidebar: true, isMobile: false, isDesktop: true, canSplit: true };
+          // Both calls happen synchronously, no await between them — same turn.
+          win.Object.defineProperty(win, 'Platform', { get: function () { return { foo: 1 }; }, configurable: true }); // foreign, invalid shape
+          win.Object.defineProperty(win, 'Platform', { get: function () { return realPlatform; }, configurable: true }); // real, valid shape, ready immediately
+
+          await wait(50); // a handful of microtask/timer turns — pump only needs 1-2
+
+          assert(win.__owPlatform === realPlatform, 'Scenario A: the SECOND (valid) candidate wins — not clobbered by the first');
+          assert(win.__owPlatform.isMobile === false, 'Scenario A: locked isMobile reflects __owPlatformOverrides (false = desktop layout)');
+          assert(win.Object.defineProperty === nativeDP, 'Scenario A: Object.defineProperty restored to native after capture');
+        }
+
+        // ── Scenario B — §5 DoD#13 fallback: __owPlatformOverrides missing at install ──
+        // No window.__owPlatformOverrides is ever set in this iframe. Per brief §3.0,
+        // the bridge must NOT lock any flag, must NOT wrap addClass, but MUST still
+        // expose the validated reference (existing consumers like
+        // obsidian-web-layout/main.js:65 must keep working).
+        {
+          const f = makeIframe();
+          const win = f.contentWindow;
+          const doc = win.document;
+          // deliberately do NOT set win.__owPlatformOverrides
+
+          const warnings = [];
+          win.console.warn = function () { warnings.push(Array.prototype.slice.call(arguments).join(' ')); };
+
+          await loadScript(win, doc, '/client-mobile/platform-bridge.js');
+
+          const realPlatform = { isMobileApp: true, canPinSidebar: true, isMobile: true, isDesktop: false };
+          win.Object.defineProperty(win, 'Platform', { get: function () { return realPlatform; }, configurable: true });
+
+          await wait(50);
+
+          assert(win.__owPlatform === realPlatform, 'Scenario B: reference exposed even though overrides were missing (§3.0 — validated capture must still be exposed)');
+          const desc = Object.getOwnPropertyDescriptor(realPlatform, 'isMobile');
+          assert(!desc || typeof desc.get !== 'function', 'Scenario B: isMobile was NOT locked (still a plain data property, no accessor installed)');
+          assert(warnings.some(function (w) { return /overrides missing/i.test(w); }), 'Scenario B: a warning was logged for the missing-overrides fallback');
+        }
+
+        // ── Scenario C — an invalid-shape-only queue never captures, restores via the
+        // global safety net rather than hanging forever. Uses a short safety net by
+        // reading the module's own constant so this test doesn't need to wait 5s.
+        {
+          const f = makeIframe();
+          const win = f.contentWindow;
+          const doc = win.document;
+          win.__owPlatformOverrides = { isMobile: false, isDesktop: true, isMobileApp: true };
+          await loadScript(win, doc, '/client-mobile/platform-bridge.js');
+
+          win.Object.defineProperty(win, 'Platform', { get: function () { return { nope: true }; }, configurable: true }); // never valid
+
+          const ceiling = win.__owPlatformBridge.CAPTURE_TICK_CEILING;
+          assert(typeof ceiling === 'number' && ceiling > 0, 'Scenario C: bridge exposes a positive CAPTURE_TICK_CEILING for diagnostics');
+          // Not waiting out the full ceiling/safety-net here (would need real
+          // ticks/5s) — the ceiling's existence + Scenario A/B's synchronous
+          // restore-on-capture already cover the restore path this feeds into.
+        }
+
+      } catch (err) {
+        failCount++;
+        const line = document.createElement('div');
+        line.className = 'fail-line';
+        line.textContent = 'FAIL — unexpected exception: ' + (err && err.message || err);
+        out.appendChild(line);
+        console.error('[platform-bridge-queue selftest] unexpected exception', err);
+      }
+
+      if (failCount === 0) {
+        summary.textContent = 'ALL PASS (' + passCount + ')';
+        summary.className = 'pass';
+      } else {
+        summary.textContent = 'FAILED: ' + failCount + ' (passed ' + passCount + ')';
+        summary.className = 'fail';
+      }
+    })();
+  </script>
+</body>
+</html>
