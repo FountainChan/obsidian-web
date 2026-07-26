@@ -54,8 +54,8 @@ to fetching this file when the API route 404s. Currently three entries:
 - **`obsidian-livesync`** (`enabled:false`) — [Self-hosted
   LiveSync](https://github.com/vrtmrz/obsidian-livesync), MIT-licensed.
 - **`dataview`** (`enabled:true`) — [Dataview](https://github.com/blacksmithgu/obsidian-dataview),
-  MIT-licensed. Backs the demo's "Dataview Queries" note — without this, the
-  ` ```dataview ` blocks in that note render as plain code, not live queries.
+  MIT-licensed. Backs the demo's "Dataview Queries" **and** "Tags" notes — without this, the
+  ` ```dataview ` blocks in both notes render as plain code, not live queries.
 
 The latter two are **downloaded from GitHub at build time** (`node
 scripts/install-plugin.js --repo <owner/name> --dest <id>`, called once per
@@ -109,7 +109,8 @@ delete `template.js`.
   default; the user opts in via Settings → Community plugins. See "System
   plugins" above.
 - **Dataview preinstalled, enabled** (`demo-and-docs-truth` §3.5-a) — the
-  demo vault's "Dataview Queries" note runs live queries out of the box.
+  demo vault's "Dataview Queries" **and** "Tags" notes run live queries out of the box
+  (the latter replaced a static, self-contradicting table — §3.6 finding, calev round 3).
   See "System plugins" above.
 - Native "**Create a vault**" button (mobile onboarding UI) works end-to-end:
   it used to call `Filesystem.mkdir()` and hit the non-existent `/api/fs/mkdir`
@@ -147,7 +148,13 @@ npm run build          # scripts/build-assets.sh → .tmp/deployments/cloudflare
 npm run dev             # local emulation (wrangler dev) — does NOT publish anywhere
 wrangler deploy        # from src/deployments/cloudflare/ — publishes for real, only when intended
 ```
-`npm run build` needs network access to GitHub (`api.github.com` +
-release-asset CDN) to fetch the LiveSync plugin on a cold cache — see
-"System plugins" above. It never blocks the build if unreachable (WARN +
-continue, layout-switcher only).
+`npm run build` needs network access to GitHub (`api.github.com` + release-asset CDN) to fetch
+the LiveSync **and** Dataview plugins on a cold cache — see "System plugins" above. If either
+download fails (offline, GitHub outage, rate limit), the build **fails loudly** (non-zero exit) —
+same behavior as described above ("System plugins"): a plugin listed with `install: true` must
+resolve, or the whole build stops rather than silently shipping a deployment that's missing a
+plugin it claims to have installed (demo-and-docs-truth §3.6-ג / DoD#13). It does **not**
+warn-and-continue — that was the previous (removed) behavior, and this paragraph itself used to
+still describe it after the fix landed elsewhere in this same file (calev round 4, finding 1).
+The layout-switcher plugin is first-party (`src/plugins/`, no download) and is unaffected by
+network access either way.
