@@ -74,9 +74,9 @@ and enabled** — it *is* added to `community-plugins.json` on seed, so it
 runs immediately in the demo vault. Pin a specific release with
 `SEED_LIVESYNC_VERSION=<tag>` / `SEED_DATAVIEW_VERSION=<tag>` (per
 `deploy-config.json`'s `versionEnv` field) before running the build; if a
-download fails (offline, GitHub outage), the build **warns and continues**
-without that one plugin — it never hard-fails the whole build on a missing
-third-party download.
+download fails (offline, GitHub outage, rate limit), the build **hard-fails**
+(non-zero exit) — a plugin listed with `install: true` must resolve, or the
+whole build stops rather than silently shipping without it.
 
 All of these plugins come from **Obsidian's community plugin list** —
 downloaded from GitHub, the same way installing a community plugin from

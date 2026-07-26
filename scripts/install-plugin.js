@@ -242,8 +242,9 @@ function resolveAssets(release) {
  * Returns { version, files } on success (files = array of installed asset
  * filenames, e.g. ['main.js','manifest.json','styles.css']). Throws on any
  * unrecoverable failure (missing required asset, network failure after
- * retries, etc.) — callers already treat a thrown/non-zero exit as "skip
- * this plugin, warn, keep building" (see build-assets.sh).
+ * retries, etc.) — the sole caller (build-system-plugins.js's buildOne(),
+ * for an `install: true` entry) re-throws this to fail the whole build; it
+ * does not warn-and-skip (see build-assets.sh, demo-and-docs-truth §3.6-ג).
  */
 async function installPlugin({ repo, dest, version, force, extraData }) {
   if (!repo) throw new Error('installPlugin requires { repo }');

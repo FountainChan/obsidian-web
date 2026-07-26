@@ -200,8 +200,9 @@ npm run dev     # local emulation (wrangler dev) — does NOT publish anywhere
 ```
 
 `npm run build` needs network access (GitHub API + release-asset CDN) to fetch the LiveSync and
-Dataview community plugins on a cold cache; if unreachable, it **warns and continues** without
-whichever plugin failed to download, rather than failing the build.
+Dataview community plugins on a cold cache; the build **fails** (non-zero exit) if either plugin
+can't be downloaded — it never ships a deployment that's silently missing a plugin it claims to
+install.
 
 `npm run deploy` (build, then `wrangler deploy`) publishes to the real Cloudflare account
 configured in `wrangler.toml` — only run it when you actually intend to publish; use `npm run dev`
