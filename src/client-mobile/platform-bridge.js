@@ -1,9 +1,11 @@
 /**
  * platform-bridge.js — runtime interception of Obsidian's `Platform` object.
  *
- * Replaces 3 of the 4 build-time patches previously applied to
- * vendor/obsidian-mobile/app.js by scripts/patch-obsidian-mobile.js
- * (expose-platform, iife-overrides, is-mobile-class). Those patches edited
+ * Replaced three of the four build-time patches that scripts/patch-obsidian-mobile.js
+ * used to apply to vendor/obsidian-mobile/app.js (expose-platform,
+ * iife-overrides, is-mobile-class); docs/plans/zero-patches.md then removed the
+ * fourth, so **no build-time patch remains** and app.js is byte-identical to
+ * Obsidian's own APK. Those patches edited
  * Obsidian's own minified source; this module achieves the same effect by
  * intercepting the native `Object.defineProperty` call webpack's export map
  * uses to wire up `Platform` (`n.d(e,{Platform:()=>bn})`), without touching

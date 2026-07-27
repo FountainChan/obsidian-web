@@ -139,8 +139,9 @@
 
   <!-- 3e. Platform bridge (docs/plans/runtime-platform-descriptors.md §2/§3) —
        wraps Object.defineProperty to capture Obsidian's Platform object at
-       runtime, replacing 3 of the 4 build-time patches on
-       vendor/obsidian-mobile/app.js. MUST load before boot.js: boot.js sets
+       runtime. This, plus docs/plans/zero-patches.md, removed every build-time
+       patch: vendor/obsidian-mobile/app.js is byte-identical to Obsidian's own
+       APK. MUST load before boot.js: boot.js sets
        window.__owPlatformOverrides synchronously at its top level, and the
        bridge reads that lazily (only once it captures Platform, which
        happens much later, after app.js is injected) — see brief §3.0 for
