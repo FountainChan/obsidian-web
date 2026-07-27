@@ -80,6 +80,12 @@
   <script src="/client-mobile/sync/remote-client.js?v=1"></script>
   <script src="/client-mobile/sync/run-pull.js?v=1"></script>
 
+  <!-- 0c. מקור-אמת יחיד לגרסת Obsidian המסופקת (docs/plans/
+       electron-shim-foundation.md §3.0) — חייב לפני capacitor-shim.js
+       (App.getInfo קורא ממנו) ולפני shims/electron.js/boot.js. GENERATED —
+       ראה obsidian-version.js עצמו. -->
+  <script src="/client-mobile/obsidian-version.js?v=1"></script>
+
   <!-- 1. Capacitor shim — חייב לפני native-bridge.js כדי שandroidBridge יהיה
        מוגדר כשהbridge מאתחל את הplatform. -->
   <script src="/client-mobile/shims/capacitor-shim.js?v=1"></script>

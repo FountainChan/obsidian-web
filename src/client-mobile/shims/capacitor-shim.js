@@ -725,7 +725,12 @@
   };
 
   const App = {
-    getInfo:              () => Promise.resolve({ name: 'Obsidian', id: 'md.obsidian', build: '0', version: '1.12.7' }),
+    // version — read lazily (inside the function body, not at module-eval
+    // time) from window.__owObsidianVersion, the single source of truth
+    // written by scripts/update-obsidian-mobile.js (docs/plans/
+    // electron-shim-foundation.md §3.0). The '1.12.7' fallback only matters
+    // if obsidian-version.js somehow failed to load before this is called.
+    getInfo:              () => Promise.resolve({ name: 'Obsidian', id: 'md.obsidian', build: '0', version: (window.__owObsidianVersion || '1.12.7') }),
     getState:             () => Promise.resolve({ isActive: true }),
     getLaunchUrl:         () => Promise.resolve(null),
     addListener:          (opts) => Promise.resolve({ remove: noop }),
