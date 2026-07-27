@@ -2,6 +2,109 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/zero-patches — Commit 1: §3א+§3ב — מחיקת ה-patch האחרון מ-`PATCHES`
+
+### מה בוצע?
+
+- **`scripts/patch-obsidian-mobile.js`** — הוסר כליל האובייקט `vault-profile-on-desktop-layout`
+  ממערך `PATCHES` (כולל ה-`find`/`replace`/`expectedMatches` וה-doc-comment הצמוד לו).
+  `PATCHES = []`. בלוק `HOW TO FIX A BROKEN PATCH` בראש הקובץ **נשאר** — ידע תפעולי לגרסה
+  הבאה, לפי §3ב בבריף. **הערת הכותרת של הקובץ (`As of ... down to ONE documented patch`)
+  לא נגעתי בה כאן** — מתוקנת ב-Commit הבא (§3ג, ניקוי-תיעוד רחב).
+- **`src/client-mobile/obsidian-version.js`** — נכתב-מחדש ע"י `update-obsidian-mobile.js`
+  (קובץ generated); התוכן (`1.12.7`) לא השתנה, רק נוסח-ההערה שלו התעדכן ל-תבנית הנוכחית
+  של הסקריפט (drift לא-קשור לסלייס הזה, אך תוצר-לוואי אמיתי של ההרצה — נשמר).
+
+### DoD#0 — `applyPatches` על מערך ריק
+
+`node scripts/update-obsidian-mobile.js --version 1.12.7` (מפורש) רץ **בלי לזרוק**, ולא
+הדפיס אף שורת `patched: ...` (הלולאה על `PATCHES` ריקה) — "Done. obsidian-mobile/ is ready".
+
+### DoD#1 — ה-hash הקובע
+
+```
+sha256(vendor/obsidian-mobile/app.js) = e4594089a106754dcc93575160351f5e0747255a8f7348be4b8be25417b91606
+size                                  = 3,754,511 bytes
+```
+
+**זהה** ל:
+1. הערך שהבריף הצהיר עליו (נמדד פעמיים ע"י אביגיל/מרדכי).
+2. המדידה העצמאית שלי מ-`unzip` ישיר על `assets/public/app.js` מתוך `Obsidian-1.12.7.apk`
+   (**לפני** הרצת הסקריפט כלל — ראה הערך למעלה ב-"קרקע המדידה").
+
+`dev/vendor/obsidian-mobile/app.js` נשאר `4b1ccd3aaf7c6292fdb1c7d2dfca21e7f6272351354d4b797eb07b16257018cf`
+— **ללא שינוי** — אומת שוב אחרי ההרצה הזו (DoD#7ב).
+
+### ארבע הפקודות של §2א.3 — מדידה **אחרי** (על הבאנדל עם `PATCHES.length===0`)
+
+```
+grep -c 'window.__owPlatform='                     → 0
+grep -c '__owPlatformOverrides'                     → 0
+grep -c '!bn.isMobile){var i=e.vault.getName()'     → 0   (היה 1)
+grep -c 'bn.isDesktopApp){var i=e.vault.getName()'  → 1   (היה 0)
+```
+
+**הזוג הדו-כיווני התהפך בשני הכיוונים** — השער עובר. (⚠️ `grep -c 'vault-profile'` **לא**
+שימש כאן — הוא היה מחזיר `1` בשני המצבים דרך `workspace-sidedock-vault-profile`, מחלקת-CSS
+של Obsidian, ולכן אינו יכול להיכשל — סבב 5 בבריף.)
+
+### בדיקות
+
+`bun test` (מהשורש, `/home/user/Projects/obsidian-web/worktrees/zero-patches`) — baseline
+נמדד **על ה-base, לפני כל שינוי בסלייס**: **143 טסטים / 138 עוברים / 5 נכשלים / 4 שגיאות**
+(אחרי `npm install` ב-`src/runtime-server/server` שהיה חסר ב-worktree הטרי — `express` וכו').
+תואם בדיוק לטווח שהבריף מצטט (§4 DoD#8). אחרי הקומיט הזה: אותה תוצאה בדיוק (143/138/5/4) —
+אין שינוי, כצפוי (זהו קובץ סקריפט build-time, אין לו טסט ייעודי; האימות האמיתי הוא ה-hash
++ ארבע ה-greps למעלה).
+
+### חריגות
+
+- `src/runtime-server/server/package-lock.json` השתנה (`npm install` הוסיף שדה `license`)
+  — **הוחזר** (`git checkout --`) לפני commit, לא קשור לסלייס.
+- אין חריגה מהותית אחרת. בדיוק לפי §3א+§3ב.
+
+## 2026-07-27 — slice/zero-patches — קרקע המדידה (§2, לפני Commit 1)
+
+### מה בוצע?
+
+לפני כל שינוי קוד, לפי §2ב+§2א בבריף:
+
+- **עותק מבודד**: `cp -a dev/vendor /tmp/zero-patches-vendor` ואז
+  `ln -sfn /tmp/zero-patches-vendor worktrees/zero-patches/vendor`. **לא** נגעתי ב-`dev/vendor`
+  ישירות — ה-symlink של הוורקטרי מצביע על `/tmp/...`, לא על `dev/vendor` (`readlink` אומת).
+- **`sha256` של `dev/vendor/obsidian-mobile/app.js` — נמדד לפני, ונמדד שוב אחרי כל הרצה של
+  `update-obsidian-mobile.js`**: `4b1ccd3aaf7c6292fdb1c7d2dfca21e7f6272351354d4b797eb07b16257018cf`
+  לפני ואחרי, בלי שינוי — `dev/vendor` שרד את כל ההרצות בסלייס הזה.
+- **מטמון ה-APK הועתק** מ-`dev/.tmp/cache/obsidian-releases/Obsidian-1.12.7.apk` (`.tmp/` הוא
+  פר-worktree — לא משותף) ל-`worktrees/zero-patches/.tmp/cache/obsidian-releases/`, ואומת
+  `sha256` זהה לשני הקבצים (`74a0741f…`) — נמנעה הורדה חוזרת (~15MB), אם כי הבדיקה גם אישרה
+  שיש חיבור-רשת חי (`GET https://api.github.com/...` הצליח).
+- **אימות עצמאי של DoD#1 לפני כל ריצת סקריפט**: `unzip` ישיר של `assets/public/app.js`
+  מתוך ה-APK הנ"ל נתן `sha256 = e4594089a106754dcc93575160351f5e0747255a8f7348be4b8be25417b91606`
+  ב-3,754,511 בתים — זהה לערך שהבריף הצהיר עליו, **לפני** שהרצתי סקריפט כלשהו של הפרויקט.
+
+### הרצת `node scripts/update-obsidian-mobile.js --version 1.12.7` (מפורש — לא ברירת-מחדל)
+
+הרצתי אותה **פעמיים**:
+
+1. **לפני §3א** (`PATCHES` עדיין מכיל את `vault-profile-on-desktop-layout`): הבנייה הטרייה
+   (מ-APK, לא ממטמון-vendor) הפיקה `sha256 = 4b1ccd3aaf7c6292fdb1c7d2dfca21e7f6272351354d4b797eb07b16257018cf`
+   — **זהה** לערך שנמדד ע"י מרדכי ב-§2 של הבריף. מאשר: סקריפט-ה-patch של הענף הזה
+   (`slice/desktop-layout-now`'s script, שממנו נוצר `slice/zero-patches`) עדיין תואם, ו-1
+   התאמה ל-regex (כצפוי, `expectedMatches: 1`).
+2. **אחרי §3א** (ראה למטה) — `sha256 = e4594089…`, DoD#1.
+
+### ארבע הפקודות של §2א.3 — מדידה **לפני** (על הבאנדל עם ה-patch עדיין בפנים)
+
+```
+grep -c 'window.__owPlatform='                     → 0
+grep -c '__owPlatformOverrides'                     → 0
+grep -c '!bn.isMobile){var i=e.vault.getName()'     → 1
+grep -c 'bn.isDesktopApp){var i=e.vault.getName()'  → 0
+```
+
+תואם למצופה: ה-patch עדיין הופך `bn.isDesktopApp` ל-`!bn.isMobile`.
+
 ## 2026-07-27 — slice/desktop-layout-now — סבב-תיקון §10א: חיווט `window.electronWindow` (calev NO-GO ממצא #1)
 
 ### מה בוצע?

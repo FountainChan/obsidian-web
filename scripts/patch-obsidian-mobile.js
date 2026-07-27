@@ -56,39 +56,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 
-const PATCHES = [
-  {
-    // The "vault profile" panel at the bottom of the left sidebar — contains
-    // help icon, settings icon, and the current-vault dropdown. The mobile
-    // bundle gates its rendering on `Platform.isDesktopApp` (always false in
-    // a real mobile build). When we override `isMobile=false` to get desktop
-    // layout, the panel is still missing because we don't (and can't) flip
-    // `isDesktopApp` globally — that flag enables ~95 other code paths that
-    // use Electron-only APIs which would crash at boot.
-    //
-    // This patch flips THIS ONE check to `!isMobile`, so the panel appears
-    // whenever we're showing desktop layout, without touching the rest.
-    //
-    // Side effect: the vault-switcher dropdown click handler inside this
-    // block calls `electron.ipcRenderer.sendSync("vault")` etc., which will
-    // throw ReferenceError in mobile (we don't shim window.electron there).
-    // The settings (⚙) and help (?) icons in the same block work fine
-    // because they only call `app.setting.open()` / `app.openHelp()`.
-    // Vault switching via this dropdown is a known follow-up; for now,
-    // users can use `/starter` to switch vaults.
-    //
-    // ANCHOR: search app.js for  .vault.getName()   inside a block guarded by
-    //   `<var>.isDesktopApp){var <x>=<app>.vault.getName(),<y>=""`.
-    // REBUILD: $1=the Platform var; the group $2 captures everything from `){`
-    //   through `getName(),<y>=""`. We only replace `<var>.isDesktopApp` with
-    //   `!<var>.isMobile`, leaving $2 intact. If the vault-name rendering shape
-    //   changes, re-anchor on `.vault.getName()` and re-capture the guard.
-    name: 'vault-profile-on-desktop-layout',
-    find:    /(\w+)\.isDesktopApp(\)\{var \w+=\w+\.vault\.getName\(\),\w+="")/,
-    replace: '!$1.isMobile$2',
-    expectedMatches: 1,
-  },
-];
+const PATCHES = [];
 
 async function applyPatches(appJsPath) {
   let content = await fsp.readFile(appJsPath, 'utf8');
