@@ -2,6 +2,49 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 5: הדלקת הדגל (isDesktopApp) + lockConst + עדכון טסטים + חיווט DoD#12
+
+### מה בוצע?
+
+- **`src/client-mobile/platform-bridge.js`**:
+  - `LOCKED_FLAGS` — נוסף `'isDesktopApp'` (4 דגלים במקום 3).
+  - `computeWant()` — **שני** מסלולי-היציאה מחזירים `isDesktopApp` עכשיו: מסלול
+    ה-emulate-mobile (early return) → `isDesktopApp: false` **קפדני** · המסלול הרגיל →
+    `isDesktopApp: !!overrides.isDesktop` (מגזרת isDesktop, לא נקרא מ-`overrides.isDesktopApp`
+    ישירות — אותה גישה כמו isMobileApp הקבוע).
+  - **§1ג** — ההערה שליד `LOCKED_FLAGS` נכתבה מחדש: כבר לא טוענת ש-`isDesktopApp` הוא no-op
+    (זה היה נכון לפני שהיה shim ל-`window.electron`; עכשיו זה שקר).
+  - **§4** — `lockConst(P, key, value)` חדש (אותה צורת `defineProperty`/`set` no-op כמו
+    `lockFlag`, בלי תלות ב-`want`) — נקרא **תמיד** (בשני הענפים של `capture`, גם כש-`want`
+    הוא `null`): `lockConst(P, 'canExportPdf', false)` ו-`lockConst(P, 'canPopoutWindow', false)`.
+  - **DoD#12** — הענף `overrides-missing` (`want === null`) עבר מ-`warnOnce(...)`
+    (console-only) ל-`reportCaptureFailure(...)` — עכשיו יש גם באנר-משתמש, לא רק console.warn.
+- **`src/client-mobile/boot.js`** — `window.__owPlatformOverrides.isDesktopApp` עבר מ-`false`
+  קבוע ל-`!layout.isMobile` (עקבי עם `isDesktop`). ההערה בת-3-השורות ליד השדה נכתבה מחדש
+  (אותה מחלקה כמו §1ג — הנימוק הישן, "הריצה תמיד דפדפן", כבר לא נכון).
+- **`src/client-mobile/test/platform-bridge.test.js`** (§1ד) — **6 ה-assertions שנשברו
+  תוקנו** (לא נמחקו): 5× `deepEqual(want, {...})` קיבלו `isDesktopApp` בליטרל הצפוי ·
+  ה-assertion של `LOCKED_FLAGS.sort()` עודכן ל-4 איברים. **נוספו 4 טסטים חדשים** (כיסוי
+  מפורש ל-`isDesktopApp === false`/`=== true` בשני המסלולים, כולל את המקרה הקריטי של
+  §1א — emulate מתוך overrides של desktop).
+
+### בדיקות
+
+- `bun test` תחת `src/client-mobile` — **86 pass / 0 fail** (עלה מ-84 → 86, מעל ה-baseline
+  76 — DoD#16 "מספר טסטים ≥ base" מתקיים, בלי "רצפה" של מחיקת assertions).
+- `node --check` על כל הקבצים שנגעו בהם — עבר.
+- **טרם בוצעה בדיקת-דפדפן חיה** — DoD#0 (`Platform.isDesktopApp`), DoD#4
+  (`canExportPdf`/`canPopoutWindow`), DoD#12 (הזרקת `undefined` ל-`__owPlatformOverrides`
+  ובדיקת הבאנר) דורשים סביבה חיה — Commit 6.
+
+### חריגות
+
+- **מתועד ולא מבוצע ע"י אליעזר**: §1ג מבקש גם לתקן את `runtime-platform-descriptors.md`
+  §3.2 (המסמך ב-docs-repo, לא בריפו הזה) — לפי הקונבנציה שנקבעה בבריפים הקודמים באותה
+  שרשרת (`electron-shim-foundation.md`/`desktop-shell-shim.md` §6: "ב-docs-repo, mordechai
+  מעדכן, לא בני-commit מהסלייס"), התיקון הזה מדווח כאן ומופנה למרדכי, לא מבוצע כ-commit
+  בריפו הקוד.
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 4: ערוצי vault*/starter/help + context-menu round-trip + clipboard.readImage
 
 ### מה בוצע?

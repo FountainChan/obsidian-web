@@ -77,14 +77,22 @@
   // "עטיפה שנשארת היא מס על כל הרנטיים").
   var ADDCLASS_SAFETY_NET_MS = 3000;
 
-  // Exactly these three are locked — brief §3.2. isPhone/isTablet are read
-  // from window.__owPlatformOverrides upstream (boot.js) but intentionally
-  // never locked here: Obsidian's own wn() rewrites them on every viewport
-  // change (matchMedia), and locking would freeze
-  // canSplit/canStackTabs/canDisplayRibbon/canPinSidebar. isDesktopApp is
-  // never set by the bundle on the mobile codepath, so overriding it would
-  // be a no-op — deliberately not attempted (brief §3.2).
-  var LOCKED_FLAGS = ['isMobile', 'isMobileApp', 'isDesktop'];
+  // Exactly these four are locked — brief §3.2 + docs/plans/
+  // desktop-layout-now.md §1. isPhone/isTablet are read from
+  // window.__owPlatformOverrides upstream (boot.js) but intentionally never
+  // locked here: Obsidian's own wn() rewrites them on every viewport change
+  // (matchMedia), and locking would freeze
+  // canSplit/canStackTabs/canDisplayRibbon/canPinSidebar.
+  //
+  // ⚠️ isDesktopApp — §1ג: THIS COMMENT USED TO SAY overriding isDesktopApp
+  // would be a no-op because "the bundle never sets it on the mobile
+  // codepath" (runtime-platform-descriptors.md §3.2, written before this
+  // repo shipped an electron shim). That was true THEN and is false NOW:
+  // desktop-layout-now turns isDesktopApp into the flag that gates ~95 code
+  // paths (window.electron consumers, the vault-switcher panel, PDF
+  // export/popout gating, …) — locking it is the entire point of this
+  // slice. Do not revert this to a comment claiming it's a no-op; it isn't.
+  var LOCKED_FLAGS = ['isMobile', 'isMobileApp', 'isDesktop', 'isDesktopApp'];
 
   // ── pure decision logic — no window/document access, unit-testable ──────
 
@@ -129,8 +137,15 @@
   // "המלכודת": on an empty object `!want.isMobile` is `true`, which would
   // wrongly suppress is-mobile while Platform still reports mobile).
   function computeWant(overrides, emulateValue) {
+    // docs/plans/desktop-layout-now.md §1א — TWO exit paths build a want
+    // literal, and BOTH must carry isDesktopApp explicitly. This
+    // emulate-mobile path is an EARLY RETURN, textually and structurally
+    // separate from the "normal" literal below — a naive "just add
+    // isDesktopApp to computeWant" that only touches the second literal
+    // leaves this one returning `undefined` for isDesktopApp under
+    // emulation (falsy, but NOT `=== false`, which DoD#0 requires strictly).
     if (isEmulateActive(emulateValue)) {
-      return { isMobile: true, isMobileApp: true, isDesktop: false };
+      return { isMobile: true, isMobileApp: true, isDesktop: false, isDesktopApp: false };
     }
     if (!overrides || typeof overrides !== 'object') return null;
     // calev (round 2) — "existing" is not "valid": window.__owPlatformOverrides
@@ -148,6 +163,16 @@
       isMobile: !!overrides.isMobile,
       isMobileApp: true, // brief §3.2: always locked true, never derived from overrides
       isDesktop: !!overrides.isDesktop,
+      // docs/plans/desktop-layout-now.md §2.1 — "want.isDesktopApp ⇔
+      // !want.isMobile": derived from the SAME source as isDesktop (boot.js
+      // computes isDesktop as !layout.isMobile too — there is no separate
+      // "desktop app vs. desktop layout" distinction upstream), not read
+      // from overrides.isDesktopApp directly (boot.js's own overrides
+      // object still carries an isDesktopApp field for readability, but
+      // this module never trusts it — same "never derived FROM overrides
+      // for this key" posture as isMobileApp above, just mirroring a
+      // different source flag instead of a hardcoded constant).
+      isDesktopApp: !!overrides.isDesktop,
     };
   }
 
@@ -390,10 +415,33 @@
         // brief §3.0 fallback: __owPlatformOverrides missing/invalid at
         // install time — do not lock anything and do NOT wrap addClass, but
         // still expose the validated reference (existing consumers like
-        // obsidian-web-layout/main.js:65 must keep working) and warn once.
-        warnOnce('overrides-missing', 'window.__owPlatformOverrides missing at install — running without platform locking.');
+        // obsidian-web-layout/main.js:65 must keep working).
+        //
+        // docs/plans/desktop-layout-now.md §1ב/DoD#12 — THIS is the "app
+        // boots, and the user has a way to notice" path: computeWant
+        // returning null means Platform.isDesktopApp could silently come
+        // out however the bundle's own default happens to be, with zero
+        // visible indication. reportCaptureFailure() (defined above,
+        // already wired to boot.js's __owReportPlatformFailure banner for
+        // the OTHER give-up paths — crash-guard, queue-drained, etc.) was
+        // NOT called from here before this slice; a plain warnOnce() only
+        // ever reached the browser console. Now it does — the bottom banner
+        // boot.js already renders for every other give-up path also covers
+        // this one.
+        reportCaptureFailure('overrides-missing', 'window.__owPlatformOverrides missing at install — running without platform locking.');
         window.__owPlatform = P;
       }
+      // docs/plans/desktop-layout-now.md §4 — canExportPdf/canPopoutWindow
+      // locked to a fixed `false`, UNCONDITIONALLY (both branches above,
+      // not just when `want` locked successfully): this deployment never
+      // supports real PDF export or Electron popout windows, independent
+      // of layout mode — there is no "want" value for either (they're not
+      // derived from isMobile/isDesktop at all, unlike LOCKED_FLAGS).
+      // lockFlag's `want[key]` pattern can't express a value with no
+      // corresponding `want` entry — hence the separate lockConst() below,
+      // same defineProperty/set-noop shape, no `want` lookup.
+      lockConst(P, 'canExportPdf', false);
+      lockConst(P, 'canPopoutWindow', false);
     } finally {
       restoreDefineProperty();
     }
@@ -405,6 +453,22 @@
     // an accessor with no setter throws there.
     orig(P, key, {
       get: function () { return want[key]; },
+      set: function () {},
+      configurable: true,
+      enumerable: true,
+    });
+  }
+
+  // docs/plans/desktop-layout-now.md §4 — same defineProperty/set-noop
+  // shape as lockFlag above, but for a genuinely CONSTANT value with no
+  // corresponding `want` entry (canExportPdf/canPopoutWindow are never
+  // derived from isMobile/isDesktop — they're just always false in this
+  // deployment). ✅ safe against `defineProperty` throwing: both
+  // canExportPdf/canPopoutWindow are plain object-literal getters on the
+  // captured Platform object, hence `configurable` by default.
+  function lockConst(P, key, value) {
+    orig(P, key, {
+      get: function () { return value; },
       set: function () {},
       configurable: true,
       enumerable: true,

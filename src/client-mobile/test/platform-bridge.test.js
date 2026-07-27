@@ -59,26 +59,42 @@ test('computeWant returns null for an overrides object with neither isMobile nor
   assert.equal(bridge.computeWant({ isPhone: true, isTablet: false }, null), null);
 });
 
-test('computeWant mirrors isMobile/isDesktop from overrides and always locks isMobileApp:true (§3.2, never derived)', () => {
+test('computeWant mirrors isMobile/isDesktop from overrides and always locks isMobileApp:true (§3.2, never derived); isDesktopApp mirrors isDesktop (desktop-layout-now §2.1 "want.isDesktopApp ⇔ !want.isMobile")', () => {
   const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true, isPhone: false, isTablet: false, isDesktopApp: false }, null);
-  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
+  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true, isDesktopApp: true });
 });
 
-test('computeWant with mobile-layout overrides', () => {
+test('computeWant with mobile-layout overrides — isDesktopApp is strictly false, not merely falsy (DoD#0)', () => {
   const want = bridge.computeWant({ isMobile: true, isDesktop: false, isMobileApp: true }, null);
-  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false });
+  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false, isDesktopApp: false });
+  assert.equal(want.isDesktopApp, false);
 });
 
 test('computeWant: EmulateMobile (truthy localStorage value) wins over __owPlatformOverrides — brief §3.5 "קדימות"', () => {
   const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '1');
-  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false });
+  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false, isDesktopApp: false });
 });
 
 test('computeWant: EmulateMobile is checked by truthiness of the raw value, not mere key existence (mirrors upstream Zee guard)', () => {
   // localStorage.getItem returns the string "" for an empty value, which is falsy —
   // must NOT be treated as "emulate active".
   const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '');
-  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true });
+  assert.deepEqual(want, { isMobile: false, isMobileApp: true, isDesktop: true, isDesktopApp: true });
+});
+
+// ── isDesktopApp — desktop-layout-now.md §1א: the emulate-mobile branch is
+// an EARLY RETURN, structurally separate from the "normal" literal — must
+// carry isDesktopApp too, or emulation would leave it `undefined` (falsy,
+// but not the strict `=== false` DoD#0 requires). ──
+
+test('computeWant: isDesktopApp is === false under EmulateMobile, even starting from desktop overrides (§1א — the early-return path)', () => {
+  const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true, isDesktopApp: true }, '1');
+  assert.equal(want.isDesktopApp, false);
+});
+
+test('computeWant: isDesktopApp is === true for desktop-layout overrides (isMobile:false/isDesktop:true) with no emulation active', () => {
+  const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, null);
+  assert.equal(want.isDesktopApp, true);
 });
 
 // ── isEmulateActive (THIRD calev pass — round 2 special-cased "0"/"false" as
@@ -109,7 +125,7 @@ test('isEmulateActive treats "1"/"true"/arbitrary truthy strings as ON', () => {
 
 test('computeWant: EmulateMobile="0" DOES activate emulation — matches the bundle\'s own guard (regression guard for the third-round revert; the second round\'s "0"=OFF behavior must NOT come back)', () => {
   const want = bridge.computeWant({ isMobile: false, isDesktop: true, isMobileApp: true }, '0');
-  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false });
+  assert.deepEqual(want, { isMobile: true, isMobileApp: true, isDesktop: false, isDesktopApp: false });
 });
 
 // ── shouldWrapAddClass (§3.3 — "the exact condition, all three caveats folded in") ──
@@ -146,6 +162,6 @@ test('exposes named, positive tick/time budgets instead of magic numbers', () =>
   assert.ok(bridge.ADDCLASS_SAFETY_NET_MS > 0);
 });
 
-test('locks exactly the three permitted flags — isMobile, isMobileApp, isDesktop (§3.2) — never isPhone/isTablet/isDesktopApp', () => {
-  assert.deepEqual(bridge.LOCKED_FLAGS.slice().sort(), ['isDesktop', 'isMobile', 'isMobileApp']);
+test('locks exactly the four permitted flags — isMobile, isMobileApp, isDesktop, isDesktopApp (§3.2 + desktop-layout-now §1) — never isPhone/isTablet', () => {
+  assert.deepEqual(bridge.LOCKED_FLAGS.slice().sort(), ['isDesktop', 'isDesktopApp', 'isMobile', 'isMobileApp']);
 });

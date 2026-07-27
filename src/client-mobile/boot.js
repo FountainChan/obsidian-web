@@ -236,15 +236,25 @@ const MOBILE_SCRIPTS = [
   //    מותאם למצב. הערה: מסך-הסטארטר עצמו (onboarding מול chooser) נבחר ב-bundle
   //    לפי *קיום-vault* (אין vaults=onboarding, יש=chooser), לא לפי הרוחב —
   //    הרוחב קובע רק את ה-layout *בתוך* אותו מסך.
-  //  • isDesktopApp:false — הריצה *תמיד* דפדפן (אין Node/Electron), גם במצב
-  //    desktop-layout → ה-bundle חוסם פלאגינים desktop-only (Terminal וכו',
-  //    isDesktopOnly) עם warning ומונע התקנה. isMobileApp:true (יש androidBridge).
+  //  • isDesktopApp — ⚠️ הופך שקרי כאן (docs/plans/desktop-layout-now.md §1ג,
+  //    אותה מחלקה כמו ההערה שליד LOCKED_FLAGS ב-platform-bridge.js): עד
+  //    לסלייס הזה הריצה הייתה *תמיד* דפדפן-בלבד (אין Node/Electron), וההערה
+  //    הקודמת כאן (isDesktopApp:false קבוע, גם במצב desktop-layout — הנימוק
+  //    היה שער isDesktopOnly) תיארה את זה נכון. עכשיו יש shim ל-window.electron
+  //    (src/client-mobile/shims/electron.js) ⇒ הדגל **כן** נדלק במצב
+  //    desktop-layout, עקבי עם isDesktop. platform-bridge.js's computeWant()
+  //    הוא זה שבפועל נועל את הדגל (מגזרת isDesktop, לא נקרא מהשדה הזה
+  //    ישירות) — הערך כאן נשאר לקריאוּת/עקביות עם שאר האובייקט, לא בגלל
+  //    שמישהו קורא אותו ישירות.
+  //    ⚠️ שער isDesktopOnly עצמו עדיין נפתח (פלאגיני desktop-only הופכים
+  //    ניתנים-להתקנה) — נמדד ותועד, לא נחסם ידנית (docs/plans/
+  //    desktop-shell-shim.md §2.5, §9 בבריף).
   window.__owPlatformOverrides = {
     isMobile:     layout.isMobile,
     isPhone:      layout.isMobile,
     isTablet:     false,
     isDesktop:    !layout.isMobile,
-    isDesktopApp: false,
+    isDesktopApp: !layout.isMobile,
     isMobileApp:  true,
   };
   console.log('[obsidian-web] platform overrides:', layout);
