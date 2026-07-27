@@ -1,6 +1,7 @@
 name = "obsidian-web-fountainchan"
 compatibility_date = "2025-01-01"
 main = "index.js"
+workers_dev = true
 
 # ── Browser file system (OPFS) deployment ─────────────────────────────────────
 # Vaults live ENTIRELY in the browser (OPFS). There is NO Durable Object /
