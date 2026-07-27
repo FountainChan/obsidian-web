@@ -2,6 +2,26 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — סיכום סלייס
+
+**8 commits** (`slice/runtime-platform-descriptors..HEAD`), כל אחד לפי §6 בבריף בדיוק.
+**86 pass / 0 fail** (`bun test` תחת `src/client-mobile`, מ-baseline 76 — +10, אפס
+"רצפה"/מחיקת assertions). **אימות-דפדפן חי** (Chromium/Playwright, Node runtime-server,
+secure context) — DoD#0/#1/#3/#4/#5/#7/#8/#9/#11/#12/#13/#14 כולם אושרו לייב, ראה
+Commit 6 ו-Commit 7 למטה לפרוטוקול המלא.
+
+**חריגה אחת מתועדת שנשארת ל-מרדכי**: תיקון `runtime-platform-descriptors.md` §3.2
+(docs-repo) — לא בוצע ע"י אליעזר, לפי הקונבנציה בבריפי A/B הקודמים.
+
+**מה עדיין פתוח (מוצהר בבריף עצמו, §9 שם)**: 76 מתוך 95 שימושי `isDesktopApp`
+בבאנדל לא נדגמו ישירות — DoD#10 (סריקת-מסכים) כיסה חלק (Settings/Command
+palette/Search/About), לא את כולם. `<webview>` בקנבס, שער `isDesktopOnly`,
+מיגרציית-סודות — מדידה/תיעוד בלבד לפי scope הבריף, לא מומשו (וגם לא נדרשו).
+
+פרטים מלאים בתתי-הרשומות למטה (Commit 1 עד Commit 8).
+
+---
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 8: תיעוד
 
 ### מה בוצע?
