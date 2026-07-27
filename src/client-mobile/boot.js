@@ -9,10 +9,11 @@
  *
  * הפריסה (mobile/desktop) נקבעת ב-client-mobile/platform-bridge.js —
  * יירוט Object.defineProperty בזמן ריצה שקורא את ה-overrides שנקבעים כאן
- * (ראה docs/plans/runtime-platform-descriptors.md). patch יחיד ותיעודי
- * (vault-profile-on-desktop-layout) עדיין קיים ב-scripts/patch-obsidian-mobile.js
- * — כל שאר התנהגות-הפלטפורמה מותאמת ברמת-ריצה, לא ע"י עריכת app.js.
- * כאן רק קובעים את ה-overrides ש-platform-bridge.js יקרא בעצלתיים בזמן ה-install.
+ * (ראה docs/plans/runtime-platform-descriptors.md). אפס build-time patches
+ * על vendor/obsidian-mobile/app.js (docs/plans/zero-patches.md) — כל
+ * התנהגות-הפלטפורמה, כולל פאנל ה-vault-profile, מותאמת ברמת-ריצה, לא ע"י
+ * עריכת app.js. כאן רק קובעים את ה-overrides ש-platform-bridge.js יקרא
+ * בעצלתיים בזמן ה-install.
  */
 
 // רשימת הscripts של Obsidian Mobile — מוזרקים דינמית אחרי האימות.

@@ -7,20 +7,23 @@
  * Applies build-time patches to the extracted Obsidian mobile bundle
  * (obsidian-mobile/app.js).
  *
- * As of docs/plans/runtime-platform-descriptors.md, this is down to ONE
- * documented patch (`vault-profile-on-desktop-layout`). The three patches
- * that used to expose `window.__owPlatform`, merge
+ * As of docs/plans/zero-patches.md, `PATCHES` is empty — the extracted
+ * bundle is applied unmodified (byte-identical to Obsidian's own APK).
+ * Three patches that used to expose `window.__owPlatform`, merge
  * `window.__owPlatformOverrides` into the Platform flags, and gate the
  * `is-mobile` body class were replaced by a runtime interceptor —
  * `src/client-mobile/platform-bridge.js` — that achieves the same effect by
- * wrapping `Object.defineProperty` instead of rewriting app.js. See that
- * brief for the full rationale (§0-§1) and the removed patches' history.
+ * wrapping `Object.defineProperty` instead of rewriting app.js (see
+ * docs/plans/runtime-platform-descriptors.md, §0-§1, for that rationale and
+ * history). The 4th and last one (`vault-profile-on-desktop-layout`, which
+ * made the desktop-layout vault-profile panel render on a code path upstream
+ * mobile always guards off) was removed outright by
+ * docs/plans/zero-patches.md, once measurement showed `platform-bridge.js`'s
+ * own `isDesktopApp` locking already covers what it used to patch.
  *
- * The one patch that remains here is a genuine bundle edit with no runtime
- * equivalent yet: it makes the desktop-layout vault-profile panel render on
- * a code path that upstream mobile always guards off. Removing it is
- * blocked on a separate slice (our own vault-profile panel) — see this
- * patch's own doc block below.
+ * This file (and its empty `PATCHES` array) stays in place as infrastructure
+ * for a future Obsidian version that might need a new patch — see "HOW TO
+ * FIX A BROKEN PATCH" below for the workflow.
  *
  * Importable:
  *   const { applyPatches, PATCHES } = require('./patch-obsidian-mobile');

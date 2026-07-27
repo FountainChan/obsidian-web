@@ -10,9 +10,12 @@
  * a single byte of app.js. See docs/plans/runtime-platform-descriptors.md
  * (§0-§3) for the full design and the live-browser spike that proved it.
  *
- * The 4th patch (vault-profile-on-desktop-layout) is NOT replaced by this
- * module — it stays a build-time patch (see scripts/patch-obsidian-mobile.js
- * and brief §1) until the vault-panel slice removes it.
+ * The 4th patch (vault-profile-on-desktop-layout) was NOT replaced by this
+ * module — it stayed a build-time patch (see scripts/patch-obsidian-mobile.js)
+ * until docs/plans/zero-patches.md removed it outright: this module's own
+ * `isDesktopApp` locking (see LOCKED_FLAGS below) already covers what that
+ * patch used to do, once desktop-layout-now turned isDesktopApp into a real,
+ * locked flag. Zero build-time patches remain on the bundle.
  *
  * Load order (brief §3.0 — this is what makes the timing work):
  *   index.html   this script          → installs the interceptor, idle

@@ -50,7 +50,7 @@ LiveSync (Obsidian plugin) מעולם לא יודע ש-Filesystem (Capacitor plu
 
 **Runtime interception של ה-Platform object** (`client-mobile/platform-bridge.js`):
 יירוט `Object.defineProperty` (לא regex patch על app.js) חושף את אובייקט ה-Platform כ-`window.__owPlatform` ונועל את `isMobile`/`isMobileApp`/`isDesktop` לפי `window.__owPlatformOverrides`. כך `client-mobile/boot.js` שולט ב-flag `isMobile` (UI layout) **לפני** ש-`app.js` רץ — ראה `docs/plans/runtime-platform-descriptors.md`.
-**Build-time patch יחיד שנותר על ה-mobile bundle** (`scripts/patch-obsidian-mobile.js`): `vault-profile-on-desktop-layout` — פאנל ה-vault-profile בתחתית הסיידבר, שחסום-מחיקה עד לסלייס פאנל-הכספת שלנו.
+**אין יותר build-time patches על ה-mobile bundle** (`docs/plans/zero-patches.md`, 2026-07-27) — `scripts/patch-obsidian-mobile.js` נשאר קיים כתשתית עם `PATCHES = []`, למקרה שגרסת Obsidian עתידית תדרוש patch. הפאטצ' האחרון (`vault-profile-on-desktop-layout`) הוסר: פאנל ה-vault-profile בתחתית הסיידבר ממשיך לרנדר במצב desktop-layout כי `client-mobile/platform-bridge.js` נועל את `isDesktopApp` ישירות — לא בזכות עריכת app.js.
 
 **System plugin overlay** (`server/system-plugins.js`):
 תוספי Obsidian מהריפו (`<repo>/plugins/`) מוזרקים כ-virtual entries לכל vault. ה-vault עצמו אינו מתלכלך — `community-plugins.json` ממוזג ב-read ומופשט ב-write. הראשון: `obsidian-web-layout` (ribbon + commands להחלפת layout). מקור עומק: [Virtual plugin overlay — deep dive](#virtual-overlay-deep-dive).
@@ -541,7 +541,7 @@ for (const f of ROOT_FILES) {
 
 ## כיוון מיושם: obsidian-web-mobile — Capacitor approach
 
-> נכון ל-2026-05-11 הגישה מיושמת בפועל: ה-mobile bundle נטען עם CapacitorAdapter, ו-3 build-time patches על `obsidian-mobile/app.js` נתנו לנו שליטה ב-layout (mobile/desktop) דרך `window.__owPlatformOverrides`. **עדכון 2026-07-26** (`docs/plans/runtime-platform-descriptors.md`): 3 מתוך ה-4 patches הוסרו והוחלפו ביירוט `Object.defineProperty` בזמן ריצה (`client-mobile/platform-bridge.js`); patch יחיד נותר (`vault-profile-on-desktop-layout`). ראה "Build-time patch approach (implemented)" בהמשך הסעיף — מתועד כפי-שהיה, לרפרנס היסטורי.
+> נכון ל-2026-05-11 הגישה מיושמת בפועל: ה-mobile bundle נטען עם CapacitorAdapter, ו-3 build-time patches על `obsidian-mobile/app.js` נתנו לנו שליטה ב-layout (mobile/desktop) דרך `window.__owPlatformOverrides`. **עדכון 2026-07-26** (`docs/plans/runtime-platform-descriptors.md`): 3 מתוך ה-4 patches הוסרו והוחלפו ביירוט `Object.defineProperty` בזמן ריצה (`client-mobile/platform-bridge.js`); patch יחיד נותר (`vault-profile-on-desktop-layout`). ראה "Build-time patch approach (implemented)" בהמשך הסעיף — מתועד כפי-שהיה, לרפרנס היסטורי. **עדכון 2026-07-27** (`docs/plans/zero-patches.md`): גם הפאטצ' היחיד שנותר הוסר — אפס build-time patches על ה-mobile bundle כיום.
 
 
 
@@ -777,10 +777,16 @@ Dv && document.body.addClass("is-android");
 > המצב **כפי שהיה עד לסלייס הזה** — נשאר כרפרנס היסטורי (הרציונל תקף גם למנגנון החדש).
 > patches 1-3 בטבלה למטה **הוסרו**; המנגנון שהם מימשו קיים היום כ-runtime interception
 > ב-`client-mobile/platform-bridge.js` (יירוט `Object.defineProperty`, לא regex על app.js).
-> patch 4 (`vault-profile-on-desktop-layout`, לא בטבלה הזו) **עדיין קיים**. שלושת ה-"Hooks"
-> וה-"עקרונות" למטה עדיין תקפים כהתנהגות-נצפית, **חוץ** מ"ההחלטה היא boot-time, לא runtime" —
-> זה כבר לא נכון: הלכידה/נעילה של Platform קורות ב-runtime, רק ה-**overrides object עצמו**
-> עדיין נקבע ב-boot-time (`boot.js`).
+> patch 4 (`vault-profile-on-desktop-layout`, לא בטבלה הזו) **היה עדיין קיים בזמן כתיבת
+> העדכון הזה**. שלושת ה-"Hooks" וה-"עקרונות" למטה עדיין תקפים כהתנהגות-נצפית, **חוץ**
+> מ"ההחלטה היא boot-time, לא runtime" — זה כבר לא נכון: הלכידה/נעילה של Platform קורות
+> ב-runtime, רק ה-**overrides object עצמו** עדיין נקבע ב-boot-time (`boot.js`).
+>
+> **עדכון 2026-07-27** (`docs/plans/zero-patches.md`): patch 4 גם הוא **הוסר**.
+> `PATCHES.length === 0` — אין יותר build-time patches על ה-mobile bundle כלל;
+> `scripts/patch-obsidian-mobile.js` נשאר כתשתית ריקה. הפאנל vault-profile ממשיך לרנדר
+> במצב desktop-layout כי `platform-bridge.js` נועל את `isDesktopApp` ישירות (ראה
+> LOCKED_FLAGS שם) — לא כי הפאטצ' עדיין קיים.
 
 **הבעיה שצריך לפתור:** ה-mobile bundle קובע ב-IIFE שלו `bn.isMobile=!0` ומוסיף `is-mobile` ל-body. גם על viewport דסקטופ זה גורם ל-170 CSS rules של mobile להופיע, mobile toolbar, ו-`isMobile=true` שמוטמע ב-`window.app` כשהוא נוצר. גישת ה-MutationObserver שהיתה ב-boot.js ניסתה לפרק את זה אחרי שה-workspace נטען — אבל זה ייצר flicker וגם לא שלט ב-`app.isMobile` שנקבע בזמן ההבנייה של ה-App.
 
@@ -796,7 +802,7 @@ Dv && document.body.addClass("is-android");
 
 **Hooks שהפתרון פותח:**
 
-- `window.__owPlatformOverrides = { isMobile: false }` ב-`client-mobile/boot.js` (לפני שה-bundle נטען) → desktop layout גם כשbundle הוא mobile.
+- `window.__owPlatformOverrides = { isMobile: false, isDesktop: true }` ב-`client-mobile/boot.js` (לפני שה-bundle נטען) → desktop layout גם כשbundle הוא mobile. ⚠️ **`isDesktop: true` חובה** מ-2026-07-27 (`docs/plans/zero-patches.md` §1ג) — בלי זה `isMobile`/`isDesktopApp` מתבדרים (`!isMobile===true` אבל `isDesktopApp===false`) ופאנל ה-vault-profile נעלם בשקט, בלי באנר.
 - `window.__owPlatform` (אחרי שה-bundle רץ) → גישה ל-flags של Platform מהקליינט (plugin עתידי, debugging).
 - localStorage key `obsidian-web:layout-mode` (`auto` | `mobile` | `desktop`) — `boot.js` קורא וקובע את ה-overrides.
 
@@ -1042,8 +1048,12 @@ LOCKED_FLAGS = ['isMobile', 'isMobileApp', 'isDesktop', 'isDesktopApp'];
 
 ```js
 // דוגמה — חייב לרוץ לפני <script src="/obsidian-mobile/app.js">:
-window.__owPlatformOverrides = { isMobile: false };
+window.__owPlatformOverrides = { isMobile: false, isDesktop: true };
 // תוצאה: bn.isMobile יהיה false למרות שברירת המחדל היא true.
+// ⚠️ isDesktop:true חובה (docs/plans/zero-patches.md §1ג) — computeWant() גוזר את
+// isDesktopApp מ-overrides.isDesktop, לא מ-overrides.isMobile. בלי isDesktop:true כאן,
+// isDesktopApp נשאר false בעוד ש-!isMobile===true — דיברגנציה, ופאנל ה-vault-profile
+// (שגייטד על isDesktopApp בבאנדל עצמו, ללא patch יותר) לא ירונדר.
 ```
 
 `isMobileApp` **לא** משתנה (זה מה שבוחר ב-CapacitorAdapter במקום FileSystemAdapter). רק ה-flags הקוסמטיים ו-layout flags ניתנים ל-override.
@@ -1055,7 +1065,7 @@ window.__owPlatformOverrides = { isMobile: false };
 | Value | תוצאה |
 |---|---|
 | `mobile` | `__owPlatformOverrides = { isMobile: true }` — mobile UI תמיד |
-| `desktop` | `__owPlatformOverrides = { isMobile: false }` — desktop UI תמיד |
+| `desktop` | `__owPlatformOverrides = { isMobile: false, isDesktop: true }` — desktop UI תמיד ⚠️ `isDesktop: true` חובה, ראה §1ג לעיל |
 | `auto` (ברירת מחדל) | viewport-based: `< 900` רוחב או `< 600` גובה → mobile, אחרת desktop |
 | חסר | `auto` |
 

@@ -2,6 +2,87 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/zero-patches — Commit 2: §3ג — ניקוי תיעוד (רחב מ-grep על השם)
+
+### מה בוצע?
+
+חיפוש לפי מושג (`patch`, `unmodified`, `documented`, `4 patches`, `3 of the`,
+`__owPlatformOverrides`, "still remains"/"patch #4"), לא לפי שם — היקף: ריפו `obsidian-web`
+בלבד, `*.md`+`*.js`+`*.html`, מחריג `node_modules`/`.tmp`/`vendor`. תוקנו רק הצהרות
+שמתיימרות לתאר את **ההווה**; יומן-חקירה היסטורי (`docs/investigations.md`, רובו) נשאר
+כפי-שהיה, עם **הוספת** הערות-עדכון מתוארכות (לא שכתוב) באותו סגנון שכבר קיים בקובץ.
+
+- **`AGENTS.md`** ("Before you touch the bundle") — "One patch... still remains" → אפס
+  patches, `PATCHES=[]` כתשתית.
+- **`docs/architecture.md`** — "patch יחיד ותיעודי" → "אפס patches", זהה-בייט ל-APK.
+- **`PLAN.md`** (חמש הצהרות — נעדר מהבריף המקורי, נכנס בסבב 2): שורה 21 (מבנה תיקיות),
+  §Mobile (שורות ~190-194), טבלת `Key files` (`vendor/obsidian-mobile/`,
+  `update-obsidian-mobile.js`, `patch-obsidian-mobile.js`).
+- **`src/client-mobile/shims/electron.js`** (הערת-קוד ליד `vault`/`vault-list`) —
+  "patch #4, still in place" → מפנה ל-`platform-bridge.js`'s `isDesktopApp` locking.
+- **`src/client-mobile/platform-bridge.js`** (הערת-כותרת) — "The 4th patch... is NOT
+  replaced... until the vault-panel slice removes it" → "was NOT replaced... until
+  zero-patches removed it outright".
+- **`scripts/patch-obsidian-mobile.js`** (הערת-כותרת) — "down to ONE documented patch...
+  blocked on a separate slice... see this patch's own doc block below" (הבלוק ההוא כבר
+  לא קיים, נמחק ב-Commit 1) → מתאר את המצב הנוכחי (`PATCHES=[]`) ומפנה ל-"HOW TO FIX".
+- **`src/client-mobile/boot.js`** (הערת-כותרת) — "patch יחיד ותיעודי... עדיין קיים" →
+  "אפס build-time patches". **אתר שלא היה ברשימת-הדוגמאות של הבריף** — נמצא ע"י הסריקה
+  הרחבה שהבריף דרש ("לא רשימה סגורה").
+- **`docs/investigations.md`** — שורה 53 (סעיף "Current state", לא יומן-היסטורי — מתוקן
+  ישירות, לא רק עדכון-מתוארך); הוספת "עדכון 2026-07-27" לשני הבלוקים ההיסטוריים (שורה
+  ~544 ו-~780) שכבר נשאו "עדכון 2026-07-26"; **שלושת אתרי-המתכון** (§1ג, DoD#9 מוצא-א):
+  - שורה 799 (Hooks bullet): `{ isMobile: false }` → `{ isMobile: false, isDesktop: true }`
+  - שורה 1045 (דוגמת-קוד): אותו תיקון + הערה שמסבירה **למה** (`computeWant` גוזר
+    `isDesktopApp` מ-`overrides.isDesktop`, לא מ-`overrides.isMobile`)
+  - שורה 1058 (טבלת `layout-mode`, שורת `desktop`): אותו תיקון
+  - ⚠️ שורה 1057 (שורת `mobile`) **לא** תוקנה — `{ isMobile: true }` בלבד אינו דיברגנטי
+    (ראה מדידה למטה) — עקבי עם §8 בבריף (סבב 5, ממצא #7).
+
+### אימות עצמאי של DoD#5א ומוצא (א) — למה התיקון נכון (לא רק "כי הבריף אמר")
+
+הרצתי את `platform-bridge.js`'s `computeWant()` האמיתי (Node, לא בדפדפן) בשלוש צורות-קלט:
+
+```
+overrides={isMobile:false} בלבד            → want={isMobile:false, isDesktopApp:false}
+                                              !isMobile===true  אבל  isDesktopApp===false
+                                              ⇒ דיברגנטי (בדיוק כפי שהבריף טוען)
+overrides={isMobile:false, isDesktop:true} → want={isMobile:false, isDesktopApp:true}
+                                              !isMobile===true  ו-  isDesktopApp===true
+                                              ⇒ לא דיברגנטי — התיקון עובד
+overrides={isMobile:true} (המתכון ל-mobile) → want={isMobile:true, isDesktopApp:false}
+                                              !isMobile===false ו-  isDesktopApp===false
+                                              ⇒ לא דיברגנטי — למה שורה 1057 לא נזקקת לתיקון
+```
+
+וגם מסלול-המוצר האמיתי (`boot.js:252-259`, שני הצורות `layout.isMobile===true/false`):
+שני הכיוונים מציבים `isMobile`/`isDesktop`/`isDesktopApp` בעקביות מלאה
+(`isDesktop===isDesktopApp===!isMobile` תמיד) — **מאשש ישירות את DoD#5א**: הדיברגנציה
+בלתי-נגישה ממסלול-מוצר, נגישה רק דרך המתכון הידני (מה שתוקן כאן).
+
+בנוסף אימתתי מבנית את §1ד (המסלול השישי): `pump()` קורא ל-`capture(P)` (שורה 355)
+**בלי try/catch** מסביבו; בתוך `capture()`, `isDesktopApp` הוא **האחרון** ברשימת
+`LOCKED_FLAGS` (`['isMobile','isMobileApp','isDesktop','isDesktopApp']`) — חריגה מ-`orig()`
+(`Object.defineProperty`) על אחד הדגלים הקודמים תשאיר את `isDesktopApp` לא-נעול בלי שה-
+`reportCaptureFailure`/באנר יופעלו (ה-`finally` עדיין משחזר את `Object.defineProperty`,
+אבל לא מגיע ל-warning). תיאורטי (תלוי שדגל אחד יהיה לא-`configurable` בבאנדל של Obsidian) —
+לא נבדק בדפדפן חי, לא חוסם, מתועד כפי שהבריף דרש.
+
+### בדיקות
+
+`node --check` על כל 4 קובצי ה-JS שנגעתי בהם (`patch-obsidian-mobile.js`,
+`platform-bridge.js`, `shims/electron.js`, `boot.js`) — עברו. `bun test` (מהשורש) —
+143/138/5/4, **זהה** ל-baseline ולתוצאת Commit 1 (אין שינוי — אלו קבצי תיעוד/הערות,
+`platform-bridge.js`'s own logic לא נגעתי בו, רק בהערת-הכותרת).
+
+### חריגות
+
+- `README.md` ו-`src/deployments/cloudflare/template.js:92` **לא** נגעתי בהם כאן —
+  נדחו במכוון ל-Commit הבא (§3ד), יחד עם המשפט המפנה ל-`platform-bridge.js`
+  שהבריף מבקש לשקול שם.
+- מוצא (א) חוצה גם את ריפו `docs-repo` (אתרי-מתכון זהים שם) — **לא בהיקף הסלייס הזה**
+  (DoD#9 מתוחם ל-`obsidian-web`); יתועד כאן כדי שמרדכי יפתח עבורו קומיט נפרד בריפו הנפרד.
+
 ## 2026-07-27 — slice/zero-patches — Commit 1: §3א+§3ב — מחיקת ה-patch האחרון מ-`PATCHES`
 
 ### מה בוצע?

@@ -18,7 +18,7 @@ Browser
 │   └── shims/capacitor-shim.js  - 13 Capacitor plugins routed to /api/*
 └── vendor/ (extracted from Obsidian, never modified; gitignored)
     ├── obsidian-desktop/  (desktop bundle)
-    └── obsidian-mobile/   (mobile bundle, one documented build-time patch remains)
+    └── obsidian-mobile/   (mobile bundle, zero build-time patches — byte-identical to the APK)
 
 Server (src/runtime-server/server/)
 ├── index.js              - Express + WebSocket
@@ -187,10 +187,12 @@ See `docs/investigations.md` for solved issues and debugging notes.
   the layout via `window.__owPlatformOverrides` based on
   `localStorage['obsidian-web:layout-mode']` (auto / mobile / desktop).
   `isMobileApp` stays `true` so the Capacitor adapter is always active;
-  only the `isMobile` flag (which controls UI layout) is toggled. One
-  documented build-time patch remains (`scripts/patch-obsidian-mobile.js`,
-  the desktop-layout vault profile panel) — everything else is runtime.
-  See `docs/walkthrough.md` (2026-05-11 and 2026-07-26) and
+  only the `isMobile` flag (which controls UI layout) is toggled. Zero
+  build-time patches remain (`scripts/patch-obsidian-mobile.js` keeps an
+  empty patch list as infrastructure for a future Obsidian version) — the
+  desktop-layout vault-profile panel that used to need one is now covered
+  by `platform-bridge.js` locking `isDesktopApp` directly. See
+  `docs/walkthrough.md` (2026-05-11, 2026-07-26, 2026-07-27) and
   `docs/investigations.md` ("Build-time patch approach (implemented)").
 
 ---
@@ -536,11 +538,11 @@ Add a `docs/livesync.md` guide covering:
 | `src/plugins/obsidian-web-layout/` | system-plugin: ribbon + commands to switch mobile/desktop layout |
 | `src/deployments/cloudflare/` | Cloudflare Workers deployment (Worker + Durable Object + build script) |
 | `vendor/obsidian-desktop/` | extracted desktop bundle, untouched |
-| `vendor/obsidian-mobile/` | extracted mobile bundle, one documented build-time patch remains; platform behaviour is runtime (`client-mobile/platform-bridge.js`) |
+| `vendor/obsidian-mobile/` | extracted mobile bundle, zero build-time patches — byte-identical to the APK; platform behaviour is runtime (`client-mobile/platform-bridge.js`) |
 | `user-data/demo-vault/` | example vault shipped with the repo |
 | `user-data/registry.json` | recent-vaults registry (gitignored, runtime) |
 | `.tmp/` | build artifacts + intermediate (folder tracked, contents gitignored) |
 | `scripts/update-obsidian-desktop.js` | downloads asar, extracts desktop bundle to `vendor/obsidian-desktop/` |
-| `scripts/update-obsidian-mobile.js` | downloads APK, extracts mobile bundle, applies patches |
-| `scripts/patch-obsidian-mobile.js` | 1 regex patch — the desktop vault-profile panel. `__owPlatform`/`__owPlatformOverrides` are runtime (`client-mobile/platform-bridge.js`), not patches |
+| `scripts/update-obsidian-mobile.js` | downloads APK, extracts mobile bundle |
+| `scripts/patch-obsidian-mobile.js` | zero regex patches (empty list, kept as infrastructure for a future Obsidian version). `__owPlatform`/`__owPlatformOverrides` are runtime (`client-mobile/platform-bridge.js`), not patches |
 | `test-vault/` | scratch vault for development |

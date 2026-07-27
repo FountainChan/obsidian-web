@@ -465,8 +465,10 @@
 
       // ── vault / vault-list / vault-open / starter / help ────────────────
       // docs/plans/desktop-shell-shim.md §2.4 — the vault-switcher panel's
-      // click handler (patch #4, still in place — the ONE remaining
-      // build-time patch, out of this slice's scope) calls these. The
+      // click handler calls these. The panel itself renders because
+      // `platform-bridge.js` locks `isDesktopApp` directly (the build-time
+      // patch that used to flip this one bundle check was removed outright
+      // in docs/plans/zero-patches.md — zero patches remain). The
       // registry (`window.__owLocalVaults`, local-vault-registry.js) only
       // ever holds local/folder vaults — a server vault's id simply won't
       // be in it, hence `|| {}` throughout instead of letting a `null`
