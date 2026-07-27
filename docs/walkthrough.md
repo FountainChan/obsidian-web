@@ -96,6 +96,48 @@
 - אין. §10ב מפורש: "למדוד ולתעד — לא לחסום. אין כאן שינוי התנהגות" — שלושתם תועדו כפתוחים,
   לא תוקנו.
 
+## 2026-07-27 — slice/desktop-layout-now — סבב-תיקון §10ג: תיקון DoD#14 — הבדיקה המכריעה הישנה הייתה ריקה בלינוקס (calev NO-GO ממצא #3)
+
+### מה בוצע?
+
+- **`docs/walkthrough.md`** — תוקנה רשומת Commit 6 (DoD#14): הטענה "קליק כפול על כותרת-טאב
+  מפעיל בפועל state אמיתי" סומנה במפורש כירוק-מזויף, עם הפניה לממצא ולתיקון.
+- **אין שינוי קוד** — §10ג הוא תיקון-בדיקה (methodology), לא באג-קוד: הקוד עצמו
+  (`makeWindow()`, alias-methods, `remote.systemPreferences`) היה תקין כל הזמן; מה
+  שהיה שגוי הוא **הבדיקה שקבעתי כ"מכריעה"** ב-DoD#14 המקורי.
+
+### הבעיה שנמצאה (NF3 בדוח כלב)
+
+`DoD#14`'s "הבדיקה המכריעה" המקורית — "קליק כפול על כותרת-טאב, לא זורק TypeError" —
+**ריקה בלינוקס**: הבאנדל רושם את ה-listener הזה רק תחת
+`function Ox(e){ bn.isMacOS && bn.isDesktopApp && e.addEventListener("dblclick", …) }`.
+בלינוקס `bn.isMacOS===false` ⇒ ה-listener **לא נרשם בכלל** ⇒ הקליק-הכפול "עבר" כי אין
+שום קוד שמאזין לו ויכול לזרוק — לא כי `window.electronWindow` היה תקין. **בדיוק באותו
+רגע `window.electronWindow` היה `undefined`** (ראה §10א למעלה) — כלומר ה-DoD "עבר" בזמן
+שהפיצ'ר שהוא אמור לבדוק היה שבור.
+
+### הבדיקה המכריעה החדשה — כבר בוצעה ותועדה ב-§10א
+
+הבריף (§10ג) מגדיר את הבדיקה הנכונה: לגרום ל-`document.hasFocus()===false` (לא תלוי
+`isMacOS`) ואז לקרוא `openFile`. **זו בדיוק הבדיקה שכבר בוצעה ותועדה בקומיט הקודם
+(§10א)** — `document.hasFocus` הוחלף ל-`() => false`, `leaf.openFile(f)` נקרא, ואומת
+"no throw" גם לפני התיקון (THROW, כדי להוכיח שהבדיקה אכן רגישה) וגם אחריו (no throw).
+אין צורך לחזור על הריצה — היא כבר קיימת כעדות ב-commit של §10א
+(Evidence: `/tmp/desktop-layout-now/phase-10a/after-fix.png`).
+
+**בנוסף**, אימתתי גם את מסלול ה-macOS עצמו (הקוד שהיה "אמור" להיבדק על ידי הבדיקה
+הישנה) ישירות מול `remote.systemPreferences.getUserDefault`/`window.electronWindow`
+(ללא תלות ב-`bn.isMacOS`, שאין לו דרך-אמת בדפדפן): שתי הקריאות לא זורקות.
+
+### בדיקות
+
+- `bun test` תחת `src/client-mobile` — 86 pass / 0 fail (ללא שינוי — אין שינוי-קוד בקומיט הזה).
+
+### חריגות
+
+- אין שינוי-קוד ב-commit הזה, לפי §10ג — "פגם בבריף שלי", לא בקוד. התיקון הוא תיעודי
+  (סימון הטענה השגויה + הפניה לבדיקה הנכונה שכבר בוצעה).
+
 ## 2026-07-27 — slice/desktop-layout-now — סיכום סלייס
 
 **8 commits** (`slice/runtime-platform-descriptors..HEAD`), כל אחד לפי §6 בבריף בדיוק.
@@ -220,6 +262,12 @@ OPFS (`0000demo0000demo`, נוצרת lazy דרך `/vault/0000demo0000demo`).
   — state אמיתי, לא no-op). כל שיטות ה-alias (`isMinimized`/`restore`/`isMaximized`/
   `unmaximize`/`minimize`/`setAlwaysOnTop`/`webContents`) נבדקו ישירות — אף אחת לא זרקה.
   `remote.app.relaunch()` לא זרק. ✅
+  ⚠️ **תוקן 2026-07-27 (calev NO-GO ממצא #1+#3, §10א/§10ג)**: הטענה "מפעיל בפועל" הייתה
+  **ירוק-מזויף** — ה-listener הזה רשום ב-`vendor/obsidian-mobile/app.js` תחת
+  `bn.isMacOS&&bn.isDesktopApp` בלבד; **בלינוקס הוא לא נרשם בכלל**, אז הקליק-הכפול "עבר"
+  כי אין מה שיזרוק, לא כי `electronWindow` עבד. ה-alias-methods שכן נבדקו ישירות עדיין
+  תקינים (זו לא הייתה שגיאה), אבל `window.electronWindow` עצמו **היה `undefined`** באותו
+  רגע — ראה תיקון §10א למטה ואת הבדיקה המכריעה החדשה (§10ג).
 - **DoD#5** — **נדחה במכוון ל-אחרי Commit 7** (כפי שהבריף דורש: חטיפת-הקליק ב-`boot.js`
   עדיין קיימת, ומפנה ל-`/starter` **דרך ה-`starter` channel שממומש כבר** — אישרתי את
   זה ישירות: קליק על `.workspace-drawer-vault-switcher` נחת על `/starter`, מוכיח
