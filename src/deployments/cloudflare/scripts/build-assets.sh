@@ -18,6 +18,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CF_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # MAIN_DIR is the repo root, three levels up from src/deployments/cloudflare/.
 MAIN_DIR="$(cd "$CF_DIR/../../.." && pwd)"
+# Windows (Git Bash / MSYS) compatibility: convert MSYS path /d/... to D:/...
+# so Node.js `require()` accepts it. No-op on Linux/macOS (cygpath absent).
+if command -v cygpath >/dev/null 2>&1; then
+  MAIN_DIR="$(cygpath -m "$MAIN_DIR")"
+fi
 PUBLIC_DIR="$MAIN_DIR/.tmp/deployments/cloudflare/public"
 
 echo "obsidian-web CF — building assets (mobile)"
@@ -183,7 +188,7 @@ LAYOUT_VER="$LAYOUT_VER" LAYOUT_ENABLED="$LAYOUT_ENABLED" LS_VERSION="$LS_VERSIO
 # Features/*) live directly in TEMPLATE_FILES, not in PLUGIN_FILES.
 echo "  building example-vault.json (static)..."
 echo 'export const PLUGIN_FILES = new Map();' > "$MAIN_DIR/src/deployments/cloudflare/plugins-generated.js"
-node -e "import('$MAIN_DIR/src/deployments/cloudflare/template.js').then(m=>{require('fs').writeFileSync('$PUBLIC_DIR/example-vault.json', JSON.stringify([...m.TEMPLATE_FILES]))})"
+node -e "import(require('url').pathToFileURL('$MAIN_DIR/src/deployments/cloudflare/template.js').href).then(m=>{require('fs').writeFileSync('$PUBLIC_DIR/example-vault.json', JSON.stringify([...m.TEMPLATE_FILES]))})"
 rm "$MAIN_DIR/src/deployments/cloudflare/plugins-generated.js"
 
 # ── Summary ────────────────────────────────────────────────────────────────
