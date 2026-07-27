@@ -2,6 +2,37 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 4: ערוצי vault*/starter/help + context-menu round-trip + clipboard.readImage
+
+### מה בוצע?
+
+- **`shims/electron.js`** — `sendSync`:
+  - `vault` → `{ path: api.vaultPath(__owVaultId, (registry.get(id)||{}).name) }`.
+  - `vault-list` → מפה `{ [id]: {path} }` על `registry.list()` (רק local/folder — server
+    לא מופיע, מוסכם ב-desktop-shell-shim.md §2.4).
+  - `vault-open` → מחלץ `id` מ-`/^\/ow\/([^/]+)\//` (שם-כספת עשוי להכיל `/`, לא נסמכים על
+    שאר המחרוזת), מנווט ל-`/vault/<id>` (setTimeout-0), **מחזיר `true` בדיוק**.
+  - `starter` → `location.href = '/starter'`. `help` → `window.open('https://help.obsidian.md/')`.
+  - `vault-remove`/`vault-move` — **לא מומשו בכוונה** (0 קריאות בבאנדל, נמדד).
+- **`send('context-menu')`** — שודרג מ-no-op שקט ל-**round-trip אמיתי**: מגיב ב-microtask
+  עם `{webContentsId, editFlags:{canCut,canCopy,canPaste,...}, misspelledWord:''}` דרך
+  `ipcRenderer.emit`. בלעדיו — תפריט-ההקשר בעורך "לא קורה כלום" (§2.6א, מצב-כשל שקט).
+- **`remote.webContents.fromId`/`getFocusedWebContents`** — מחזירים עכשיו את
+  `webContentsInstance` האמיתי (לא `null`) כדי ש-`.cut()`/`.copy()`/`.paste()` על
+  תוצאת ה-context-menu round-trip לא יזרקו.
+- **`clipboard.readImage()`** — **סינכרוני** (לא Promise — הבאנדל קורא בלי await), מחזיר
+  `nativeImage` ריק (`isEmpty()===true`) כדי שנתיב ה"הדבקת תמונה" ידלג בחן במקום לזרוק.
+
+### בדיקות
+
+- `node --check` על `shims/electron.js` — עבר.
+- `bun test` תחת `src/client-mobile` — 84 pass / 0 fail (ללא רגרסיה; אין עדיין טסטים
+  ייעודיים ל-electron.js — האימות האמיתי בדפדפן, Commit 6).
+
+### חריגות
+
+- אין.
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 3: EISDIR בשורש-הכספת + api.vaultPath + בדיקות-יחידה
 
 ### מה בוצע?

@@ -442,14 +442,53 @@
         return warnUnimplemented('ipcRenderer.sendSync(' + channel + ')')();
       }
 
-      // vault-open — one of the 7 __owSyncJson call sites the archive used
-      // to hit a Node server that doesn't exist here. The real
-      // implementation (vault*/starter/help — desktop-shell-shim.md §2.4)
-      // lands in a later commit; until then this channel is a deliberate,
-      // explicit no-op — NOT the archived '/?vault=<id>' navigation (that
-      // URL shape no longer exists — see docs/plans/url-routing.md).
+      // ── vault / vault-list / vault-open / starter / help ────────────────
+      // docs/plans/desktop-shell-shim.md §2.4 — the vault-switcher panel's
+      // click handler (patch #4, still in place — the ONE remaining
+      // build-time patch, out of this slice's scope) calls these. The
+      // registry (`window.__owLocalVaults`, local-vault-registry.js) only
+      // ever holds local/folder vaults — a server vault's id simply won't
+      // be in it, hence `|| {}` throughout instead of letting a `null`
+      // registry.get() result throw.
+      if (channel === 'vault') {
+        const registry = window.__owLocalVaults;
+        const id = window.__owVaultId || '';
+        const name = (registry && registry.get(id) || {}).name;
+        const path = registry ? registry.vaultPath(id, name) : '/ow/' + id + '/' + id;
+        return { path };
+      }
+      if (channel === 'vault-list') {
+        const registry = window.__owLocalVaults;
+        const out = {};
+        if (registry) {
+          for (const v of registry.list()) {
+            out[v.id] = { path: registry.vaultPath(v.id, v.name) };
+          }
+        }
+        return out;
+      }
       if (channel === 'vault-open') {
-        return warnUnimplemented('ipcRenderer.sendSync(vault-open)')();
+        // §2.4 — id extraction anchors on api.vaultPath's own "/ow/<id>/<name>"
+        // shape; a vault NAME may itself contain '/', so this only trusts
+        // the id segment (bounded by the two slashes vaultPath always
+        // emits), never splits on the rest of the string.
+        const m = /^\/ow\/([^/]+)\//.exec(args[0] || '');
+        if (!m) return false;
+        const id = m[1];
+        // Deferred one tick (mirrors the archived seed) — this is a
+        // *synchronous* IPC call; navigating mid-call, before sendSync even
+        // returns `true` to its caller, would abandon whatever the caller
+        // still does with that return value this same turn.
+        setTimeout(() => { location.href = '/vault/' + encodeURIComponent(id); }, 0);
+        return true;   // ⚠️ MUST be exactly `true` — `!0!==sendSync(...)` shows an error Notice otherwise.
+      }
+      if (channel === 'starter') {
+        location.href = '/starter';
+        return null;
+      }
+      if (channel === 'help') {
+        window.open('https://help.obsidian.md/', '_blank', 'noopener');
+        return null;
       }
 
       if (Object.prototype.hasOwnProperty.call(SETTER_CHANNELS, channel)) {
@@ -528,6 +567,37 @@
         window.open(args[0], '_blank', 'noopener');
         return;
       }
+
+      // context-menu — a ROUND-TRIP channel (docs/plans/desktop-shell-shim.md
+      // §2.6א), not fire-and-forget: the caller registers
+      // `ipcRenderer.once('context-menu', cb)` synchronously BEFORE calling
+      // `send('context-menu')` (see the bundle's own `Rn(e)`), then waits up
+      // to 1000ms for that `once` to fire; a silent no-op here (the
+      // archived seed's original behavior) means the wait always times out,
+      // `p` stays null, and the caller returns early — the editor's
+      // right-click context menu never opens, with NO console error (§2.6א:
+      // "מצב-הכשל הוא 'לא קורה כלום'"). Answered in a microtask (not
+      // synchronously — `once` must already be registered, which it always
+      // is by the time `send` is even called, but a microtask hop keeps
+      // this decoupled from that ordering guarantee, same reasoning as
+      // platform-bridge.js's onAppJsSettled). Payload shape reverse-engineered
+      // from the two callers (`p.webContentsId`, `p.editFlags.{canCut,
+      // canCopy,canPaste}`, `p.misspelledWord`) — misspelledWord stays falsy
+      // so the spellchecker-suggestions branch (out of scope) is skipped.
+      if (channel === 'context-menu') {
+        queueMicrotask(() => {
+          ipcRenderer.emit('context-menu', {}, {
+            webContentsId: webContentsInstance.id,
+            editFlags: {
+              canCut: true, canCopy: true, canPaste: true, canDelete: true,
+              canSelectAll: true, canUndo: true, canRedo: true,
+            },
+            misspelledWord: '',
+          });
+        });
+        return;
+      }
+
       // Application-menu IPC channels + a few About-screen fire-and-forget
       // channels — ignored on web, silently and explicitly (docs/plans/
       // electron-shim-foundation.md §3.2 "ipcRenderer.send — לא היה באף
@@ -535,15 +605,11 @@
       // Electron menu bar isn't visible), and create-browser-session /
       // check-update / insider-build fire on every Settings-open/About-open
       // — routing them to the generic "unhandled" warning below would spam
-      // the console on ordinary use. context-menu gets a REAL round-trip
-      // implementation in a later commit (docs/plans/desktop-shell-shim.md
-      // §2.6א) — until then it stays silent too, matching the archived
-      // seed's original (also-silent) behavior.
+      // the console on ordinary use.
       if (
         channel === 'set-menu' ||
         channel === 'update-menu-items' ||
         channel === 'render-menu' ||
-        channel === 'context-menu' ||
         channel === 'create-browser-session' ||
         channel === 'check-update' ||
         channel === 'insider-build'
@@ -608,8 +674,16 @@
       defaultSession: { setSpellCheckerLanguages: () => {} },
     },
     webContents: {
-      fromId: () => null,
-      getFocusedWebContents: () => null,
+      // fromId — docs/plans/desktop-shell-shim.md §2.6א: the editor's
+      // context-menu round-trip resolves `remote.webContents.fromId(p.
+      // webContentsId)` and then calls real methods on the result
+      // (`.cut()`/`.copy()`/`.paste()`/`.replaceMisspelling()`) — there is
+      // only ever ONE webContents in this shim (webContentsInstance),
+      // matching the id (1) the context-menu response above always answers
+      // with. `() => null` (the archived default) made every one of those
+      // calls throw on `null.cut`.
+      fromId: () => webContentsInstance,
+      getFocusedWebContents: () => webContentsInstance,
     },
     nativeTheme: (function () {
       const t = {
@@ -695,12 +769,22 @@
           ? nativeWrite(text)
           : Promise.reject(new Error('[obsidian-web] clipboard.writeText unavailable')),
         readText: () => nativeRead ? nativeRead() : Promise.resolve(''),
-        // readImage — the PASTE path (gated on isDesktopApp in this bundle,
-        // docs/plans/desktop-shell-shim.md §2.6ב DoD#25) lands in a later
-        // commit. writeImage (the COPY path, used by Web Viewer's
-        // "copy image" context-menu item) is NOT gated — see nativeImage
-        // below, both must exist together.
-        writeImage: (img) => { /* accepted — see nativeImage.createFromBuffer below */ },
+        // readImage — the PASTE path (docs/plans/desktop-shell-shim.md
+        // §2.6ב DoD#25 — gated on isDesktopApp, unlike writeImage below).
+        // Called SYNCHRONOUSLY by the bundle (`var n = t.readImage()`, no
+        // await) — must return a nativeImage-shaped object directly, never
+        // a Promise. A browser tab has no real OS-clipboard image API to
+        // read from; an always-EMPTY image (isEmpty()===true) makes the
+        // bundle's own guard skip the "paste non-text content" branch
+        // gracefully instead of throwing on `undefined.createFromBuffer`-
+        // shaped access.
+        readImage: () => makeNativeImage(new Uint8Array(0)),
+        // writeImage — the COPY path (Web Viewer's "copy image" context
+        // menu item, `Hn().writeImage(i)`) — NOT gated on isDesktopApp
+        // (electron-shim-foundation.md §3.1 change #6), so this must exist
+        // regardless of layout. The real bytes are discarded — see
+        // nativeImage.createFromBuffer below for why that's acceptable.
+        writeImage: (img) => { /* accepted, discarded — see nativeImage below */ },
       };
     })(),
   };
