@@ -2,6 +2,68 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 6: אימות מלא בדפדפן
+
+**סביבה**: Node runtime-server מקומי (`http://127.0.0.1:3577`, secure-context —
+127.0.0.1 נחשב trustworthy), Chromium (Playwright 1.61.1 מקומי, headless), כספת דמו
+OPFS (`0000demo0000demo`, נוצרת lazy דרך `/vault/0000demo0000demo`).
+⚠️ `SYSTEM_PLUGINS_SEED_DISABLED=obsidian-livesync` נדרש כדי ש-livesync ייזרע מקומית —
+ברירת-המחדל של השרת המקומי (לא CF) לא זורעת אותו כלל (התנהגות קיימת, לא קשורה לסלייס).
+
+### מה נבדק ואומת (לייב, לא בקוד)
+
+- **DoD#0** — `window.__owPlatform.isDesktopApp === true` בפריסת-דסקטופ, `=== false`
+  בפריסת-מובייל (נבדק בקונסולה, לא דרך `require('obsidian')`). ✅
+- **DoD#1** — ribbon, `.mod-left-split`, `.mod-right-split`, status bar קיימים;
+  `.mobile-navbar`/`.mobile-toolbar` נעדרים; `is-mobile` נעדר מ-`body`. ✅
+- **DoD#2** — `app.vault !== null`, `getName()==='Demo'`, `.workspace-leaf` קיים.
+  ⚠️ `getFiles().length === 0` — **לא רגרסיה**: `example-vault.json` קיים רק ב-build
+  של CF (מתועד כבר בקוד `boot.js`), אז כספת-הדמו המקומית ריקה במכוון בסביבת-הפיתוח
+  המקומית. נבדק גם קרוא+כתיבה אמיתיים (DoD#9, ראה למטה) שמוכיחים שהכספת אכן פעילה.
+- **DoD#3** — `resourcePathPrefix === "file:///"`, "Show debug info" מציג
+  `API version: 1.12.7` (לא ריק) ואין "installer version too low"/"Manual update
+  required". ✅
+- **DoD#4** — `canExportPdf === false`, `canPopoutWindow === false` **קפדני**. ✅
+- **DoD#7** — קליק-ימני בתוך העורך פותח `.menu.mod-context` (הבדיקה המכריעה של
+  §2.6א — לפני התיקון היה "לא קורה כלום"). ✅
+- **DoD#8** — מעבר `mobile`/`desktop`/`auto` (localStorage + reload) — כל שלושתם
+  עקביים (`isMobile`/`isDesktopApp`/`is-mobile`/`.mobile-navbar` תואמים), אפס שגיאות. ✅
+- **DoD#9** — יצירת קובץ + הקלדה אמיתית בעורך (מקלדת, לא API בלבד) + reload —
+  התוכן שרד. ✅
+- **DoD#11** — `obsidian-livesync` מופעל ידנית (`enablePluginAndSave`) — אפס שגיאות
+  חדשות. `window.require('electron')` (הנתיב שפלאגין-real מקבל) מחזיר אובייקט אמיתי
+  עם `ipcRenderer`. ✅
+- **DoD#12** — הזרקת `delete window.__owPlatformOverrides` (route interception על
+  בקשת `app.js`, לפני שהוא רץ — **חובה** `serviceWorkers:'block'` בקונטקסט, אחרת
+  ה-SW עוקף את ה-interception) → הבאנר `#ow-platform-warning` מופיע עם הטקסט הנכון,
+  `isDesktopApp === false` (לא נעול, לא crash). ✅
+- **DoD#13** — הדלקת `nativeMenus` (`vault.setConfig` + `saveConfig()` + reload,
+  1000ms debounce על `requestSaveConfig` — נדרש להמתין/לקרוא ל-save מפורשות) → קליק-ימני
+  על tab-header פותח `.menu.mod-context` (השim שלנו, `remote.Menu.buildFromTemplate`)
+  **במיקום הקליק בדיוק** (לא 0,0). ✅ מאשש את תיקון §5ד.
+- **DoD#14** — קליק כפול על כותרת-טאב לא זורק (מפעיל בפועל את
+  `remote.systemPreferences.getUserDefault` → `electronWindow.isMaximized()`/`maximize()`
+  — state אמיתי, לא no-op). כל שיטות ה-alias (`isMinimized`/`restore`/`isMaximized`/
+  `unmaximize`/`minimize`/`setAlwaysOnTop`/`webContents`) נבדקו ישירות — אף אחת לא זרקה.
+  `remote.app.relaunch()` לא זרק. ✅
+- **DoD#5** — **נדחה במכוון ל-אחרי Commit 7** (כפי שהבריף דורש: חטיפת-הקליק ב-`boot.js`
+  עדיין קיימת, ומפנה ל-`/starter` **דרך ה-`starter` channel שממומש כבר** — אישרתי את
+  זה ישירות: קליק על `.workspace-drawer-vault-switcher` נחת על `/starter`, מוכיח
+  ש-`sendSync('starter')` עובד).
+- **מסך-בדיקה כללי (חלק מ-DoD#10)** — Settings, Command palette (`Ctrl+P`), Search
+  (`Ctrl+Shift+F`), About tab — כולם נפתחים, אפס `pageerror` חדשות.
+
+### רעש שאינו רגרסיה (נמדד ומתועד, לא תוקן)
+
+- **"A network error occurred." × 8** ו-404 על שני קובצי `.woff2` — **מופיע גם
+  בפריסת-מובייל הטהורה** (`isDesktopApp` לא מעורב כלל, נבדק ישירות) — רעש קיים-מראש
+  של סביבת-הבדיקה הזו (ככל-הנראה fetch חיצוני שנכשל ברשת הסנדבוקס של הריצה), **לא
+  רגרסיה מהסלייס הזה**.
+
+### חריגות
+
+- אין קוד חדש ב-commit הזה — אימות בלבד, לפי §6 Commit 6 בבריף.
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 5: הדלקת הדגל (isDesktopApp) + lockConst + עדכון טסטים + חיווט DoD#12
 
 ### מה בוצע?
