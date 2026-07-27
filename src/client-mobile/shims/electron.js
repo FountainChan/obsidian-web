@@ -337,6 +337,27 @@
   }
   const webContentsInstance = makeWebContents();
 
+  // ── main-window instance — §10א (fix round after calev NO-GO) ──────────
+  // A SINGLE instance, not a factory: `window.electronWindow` and
+  // `electron.remote.getCurrentWindow()` must be the SAME object, so any
+  // identity comparison in the bundle (or a caller that stashes the
+  // reference and later checks `win === electronWindow`) sees one
+  // consistent window, matching real Electron's single BrowserWindow for
+  // the main renderer. Measured (docs/plans/desktop-layout-now.md §10א):
+  // §5ב's claim that "the bundle sets window.electronWindow itself via
+  // remote.getCurrentWindow()" was wrong — that assignment (`v$`) only
+  // runs for CHILD windows (popout / print-preview); the main window's own
+  // `window.electronWindow` is never set by anything in app.js, and is
+  // instead expected to already exist before app.js runs (in real
+  // Electron, a preload script does this). `WorkspaceRoot.prototype.focus`
+  // reads `this.win.electronWindow` — and for the main window `this.win
+  // === window` — so without this, any call into `openFile`/`revealLeaf`/
+  // `setActiveLeaf(...,{focus:true})` while `document.hasFocus()===false`
+  // throws `TypeError: Cannot read properties of undefined (reading
+  // 'isMinimized')`. See global.electronWindow assignment at the bottom of
+  // this file for where it's actually wired onto `window`.
+  const mainWindowInstance = makeWindow();
+
   // ---- ipcRenderer ------------------------------------------------------
 
   const ipcListeners = new Map();
@@ -750,7 +771,10 @@
       relaunch: () => {},
       quit: () => { location.reload(); },
     },
-    getCurrentWindow: makeWindow,
+    // Returns the SAME instance every call — see mainWindowInstance above
+    // (§10א). Popouts/print-preview (out of scope — canPopoutWindow is
+    // locked false) still get fresh instances via BrowserWindow() below.
+    getCurrentWindow: () => mainWindowInstance,
     getCurrentWebContents: () => webContentsInstance,
     BrowserWindow: function () { return makeWindow(); },
     clipboard: (function () {
@@ -854,4 +878,13 @@
 
   global.__owElectron = api;
   global.electron = api;
+
+  // Third exposure point — §10א / DoD#14. In real Electron a preload
+  // script sets `window.electronWindow` on the MAIN window before the
+  // renderer's own script runs; this bundle never does it itself (see the
+  // big comment above `mainWindowInstance`). Set here, synchronously, at
+  // shim-load time — this file is loaded (index.html) before boot.js,
+  // which is loaded before app.js, so it's in place for every consumer
+  // (`this.win.electronWindow` et al.) from the first tick app.js runs.
+  global.electronWindow = mainWindowInstance;
 })(window);

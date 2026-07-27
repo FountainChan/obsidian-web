@@ -2,6 +2,64 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — סבב-תיקון §10א: חיווט `window.electronWindow` (calev NO-GO ממצא #1)
+
+### מה בוצע?
+
+- **`src/client-mobile/shims/electron.js`** — נוצר `mainWindowInstance = makeWindow()` **instance
+  יחיד** (לא factory), מוגדר ליד `webContentsInstance`. `remote.getCurrentWindow()` הוחלף
+  מ-`makeWindow` (יצר proxy חדש בכל קריאה) ל-`() => mainWindowInstance` (אותו אובייקט תמיד).
+  בסוף הקובץ נוסף `global.electronWindow = mainWindowInstance` — **נקודת-חשיפה שלישית**,
+  לצד `global.electron`/`global.__owElectron` הקיימים.
+
+### למה זה תיקן את הרגרסיה שכלב הוכיח A/B
+
+§5ב בבריף המקורי טען ש"הבאנדל מציב את `window.electronWindow` בעצמו מ-
+`remote.getCurrentWindow()`" — **מדידה שגויה**. בדקתי בבאנדל: הפונקציה שעושה את ההצבה הזו
+(`e.electronWindow=i.remote.getCurrentWindow()`) יושבת בתוך `v$`, שרץ **רק על חלונות-בת**
+(popout/print-preview — מחוץ ל-scope, `canPopoutWindow` נעול `false`). על **החלון הראשי**
+שום דבר בבאנדל לא מציב את הגלובל — ב-Electron האמיתי preload script עושה את זה לפני
+שהרנדרר-סקריפט רץ. `WorkspaceRoot.prototype.focus` (`Px.prototype.focus`) קורא
+`this.win.electronWindow`, וב-`this.win === window` לחלון הראשי — ולכן ללא ההצבה, כל קריאה
+ל-`openFile`/`revealLeaf`/`setActiveLeaf(...,{focus:true})` בזמן ש-`document.hasFocus()===false`
+זרקה `TypeError: Cannot read properties of undefined (reading 'isMinimized')`.
+
+### שחזור חי לפני התיקון (git stash) ואימות אחריו
+
+הרצתי Chromium/Playwright מול `http://127.0.0.1:3593/vault/0000demo0000demo` (layout=desktop,
+`serviceWorkers:'block'`), עם `document.hasFocus` מוחלף ל-`() => false` (ללא stubbing נוסף) —
+אותה שיטת-שחזור שכלב תיעד ב-`22-iframe-unfocused.png`:
+
+| | לפני התיקון (`git stash`) | אחרי התיקון |
+|---|---|---|
+| `typeof window.electronWindow` | `"undefined"` | `"object"` |
+| `app.workspace.rootSplit.focus()` | **THROW** `TypeError: … reading 'isMinimized'` | no throw |
+| `leaf.openFile(f)` | **THROW** אותה שגיאה, הקובץ לא נפתח | no throw, `activeFile === 'CalevProbe2.md'` |
+
+בנוסף אימתתי ישירות שכל שיטות ה-alias שכלב ציין (`isMinimized`/`restore`/`isMaximized`/
+`unmaximize`/`minimize`/`setAlwaysOnTop`/`maximize`/`show`/`isFocused`/`isFullScreen`/
+`webContents`) וגם `remote.systemPreferences.getUserDefault`/`remote.app.relaunch` — כולן
+לא זורקות על `window.electronWindow` (היו כבר ממומשות ב-`makeWindow()`/`remote` מקומיים —
+החוט החסר היה רק בין `makeWindow()` לגלובל, כפי שדוח כלב אבחן: "צרכן ומוצא לב תקינים,
+הצנרת ביניהם לא נמתחה").
+
+### מדידה עצמאית (לא הסתמכתי על רשימת הבריף)
+
+הבריף הזהיר שגריפ נאיבי על `electronWindow` פספס 7 שיטות שנקראות דרך alias
+(`var w = this.win.electronWindow`). בדקתי ידנית בבאנדל את כל אתרי-הקריאה (11 מופעים) —
+כל השיטות שנקראות עליו כבר קיימות ב-`windowMethodReturns`/`windowStatefulMethods` הקיימים
+(שהיו שם עוד מ-Commit 2); לא נדרשה תוספת לטבלאות עצמן, רק חיווט הגלובל.
+
+### בדיקות
+
+- `bun test` תחת `src/client-mobile` — 86 pass / 0 fail (ללא שינוי במספר — הקובץ הזה אין לו
+  טסטים ייעודיים; האימות האמיתי הוא ריצה חיה בדפדפן, כמתואר למעלה).
+- `node --check` על `shims/electron.js` — עבר.
+
+### חריגות
+
+- אין. תיקון ממוקד, בדיוק לפי §10א בבריף.
+
 ## 2026-07-27 — slice/desktop-layout-now — סיכום סלייס
 
 **8 commits** (`slice/runtime-platform-descriptors..HEAD`), כל אחד לפי §6 בבריף בדיוק.
