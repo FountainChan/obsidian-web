@@ -2,6 +2,35 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 8: תיעוד
+
+### מה בוצע?
+
+- **`docs/investigations.md`** — סעיף `window.__owPlatform` runtime API (§ "שני
+  globals שונים — אל תבלבל ביניהם"): שתי הצהרות הפכו שקריות ותוקנו —
+  1. `window.__owPlatform.isDesktopApp // false ב-mobile bundle תמיד` → תוקן לתאר את
+     ההתנהגות הנוכחית (true בדסקטופ, false במובייל/אמולציה) + הפניה ל-§1.
+  2. `LOCKED_FLAGS = ['isMobile','isMobileApp','isDesktop']` (שלושה, עם הערה
+     "isDesktopApp נקרא ונענה בכוונה" — כלומר "מוותרים עליו במפורש") → עודכן לארבעה
+     דגלים, ההערה השקרית הוסרה.
+  **אותה מחלקת-טעות בדיוק כמו §1ג** (platform-bridge.js, Commit 5) — רק במסמך שני.
+
+### חריגות (מתועד, לא מבוצע כאן)
+
+- **§1ג מבקש גם תיקון ל-`runtime-platform-descriptors.md` §3.2** — מסמך ב-docs-repo
+  (לא בריפו הקוד הזה). **לא בוצע ע"י אליעזר**, לפי הקונבנציה שנקבעה בבריפים
+  הקודמים באותה שרשרת (`electron-shim-foundation.md`/`desktop-shell-shim.md` §6:
+  "ב-docs-repo, mordechai מעדכן, לא בני-commit מהסלייס"). **מדווח כאן ומופנה למרדכי**
+  (כבר סומן גם ב-Commit 5).
+- שאר `docs/investigations.md` (טבלת ה-Electron IPC של ה-desktop bundle הארכיוני,
+  §"Electron stubs שצריך לדעת") — **לא נגעו**: אלה הערות-חקירה היסטוריות על ה-desktop
+  client (`archive/desktop-runtime`), לא הצהרות על המצב הנוכחי של `client-mobile/`,
+  ותיקון מקיף שלהן חורג מ-scope הבריף (§1ג + הפניה בלבד).
+
+### בדיקות
+
+- `bun test` תחת `src/client-mobile` — 86 pass / 0 fail (ללא שינוי — commit תיעוד בלבד).
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 7: הסרת חטיפת-הקליק על vault-switcher
 
 ### מה בוצע?

@@ -926,7 +926,10 @@ function pm(name) { return { name, rtype: 'promise' }; }
 ```js
 window.__owPlatform.isMobile      // true / false  (קריא)
 window.__owPlatform.isPhone       // נגזר מ-viewport (~600px), קריא לרוב
-window.__owPlatform.isDesktopApp  // false ב-mobile bundle תמיד
+window.__owPlatform.isDesktopApp  // true בפריסת-דסקטופ, false במובייל/אמולציה —
+                                   // ⚠️ עדכון 2026-07-27 (docs/plans/desktop-layout-now.md
+                                   // §1): לפני הסלייס הזה זה היה false קבוע (אין electron
+                                   // shim). עכשיו נעול כמו שלושת האחרים (למטה).
 ```
 
 **`isMobile`/`isMobileApp`/`isDesktop` נעולים — כתיבה אליהם היא no-op** (accessor עם
@@ -941,12 +944,16 @@ window.__owPlatform.isDesktopApp  // false ב-mobile bundle תמיד
 (לא ב-init של ה-IIFE — ראה brief §3.0 לתרשים-הסדר המלא):
 
 ```js
-// platform-bridge.js locks exactly these three flags to window.__owPlatformOverrides:
-LOCKED_FLAGS = ['isMobile', 'isMobileApp', 'isDesktop'];
+// platform-bridge.js locks exactly these FOUR flags to window.__owPlatformOverrides
+// (עדכון 2026-07-27, docs/plans/desktop-layout-now.md §1 — isDesktopApp נוסף; לפני
+// כן היו רק שלושה, וההערה כאן טענה ש-isDesktopApp "נקרא ונענה בכוונה" — זה היה נכון
+// לפני שהיה electron shim, ולא נכון יותר):
+LOCKED_FLAGS = ['isMobile', 'isMobileApp', 'isDesktop', 'isDesktopApp'];
 ```
 
-מה ש-`__owPlatformOverrides` מכיל מנצח את ברירות המחדל של ה-bundle לשלושת הדגלים האלה
-בלבד; `isPhone`/`isTablet`/`isDesktopApp` נקראים ונענים בכוונה (ראה brief §3.2).
+מה ש-`__owPlatformOverrides` מכיל מנצח את ברירות המחדל של ה-bundle לארבעת הדגלים האלה
+בלבד; `isPhone`/`isTablet` נקראים ונענים בכוונה (viewport-based, לא ננעלים — ראה
+`platform-bridge.js`'s own LOCKED_FLAGS comment).
 
 **חובה להגדיר אותו לפני שה-bundle נטען.** ב-`client-mobile/boot.js` זה קורה ב-sync code לפני ה-`fetch()` ל-bootstrap (שאחריו ה-scripts מוזרקים). אם תגדיר אותו אחרי ש-`app.js` נטען, אין לזה השפעה — ה-bridge כבר קרא אותו פעם אחת, ב-install.
 
