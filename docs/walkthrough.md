@@ -2,6 +2,46 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/zero-patches — Commit 3: §3ד — `template.js:92` (ההצהרה הציבורית) + README
+
+### מה בוצע?
+
+**`src/deployments/cloudflare/template.js:92`** — זו ההצהרה שמופיעה בדף הדמו הציבורי
+(§0א בבריף), והייתה שגויה כשנכתבה (patch עדיין היה קיים). אחרי Commit 1 היא נכונה
+כשלעצמה ("completely unmodified"), אך §3ד מבקש גם לשקול משפט שמסביר *איך* מושג
+התנהגות-הפלטפורמה בלי לגעת בקובץ — נוסף: "byte-for-byte identical to Obsidian's own
+Android bundle, zero build-time patches" + משפט שמפנה ל-`client-mobile/platform-bridge.js`
+(`Object.defineProperty` interception) כהסבר. **לא נגעתי ב-`platform-bridge.js` עצמו** —
+רק בפרוזה שמתארת אותו.
+
+**`README.md`** — ארבע ההצהרות שנשארו מ-Commit 2 (במכוון נדחו לכאן): שורות 7, 45, 106,
+242 — "one documented patch remains" / "applies one documented build-time patch" /
+"apply a small set of documented patches" → "zero build-time patches" /
+"byte-identical to the APK" / "does not modify... unmodified", עם הפניה ל-
+`client-mobile/platform-bridge.js` בשורה 106. שורות 110 ו-204 (הוראות למשתמש להריץ
+`node scripts/update-obsidian-mobile.js && node scripts/patch-obsidian-mobile.js`)
+**לא שונו** — הפקודה עדיין תקינה ובטוחה (patch-obsidian-mobile.js הוא no-op עם
+`PATCHES=[]`), אין בה הצהרה שגויה.
+
+### בדיקות
+
+`bun test`: 143/138/5/4 — זהה. `node --check src/deployments/cloudflare/template.js` —
+עבר (קובץ template literals עם JS מסביב).
+
+### סריקה סופית (DoD#9) — אפס אתרים שמתארים patches שלא קיימים, היקף `obsidian-web`
+
+```
+grep -rniE "one documented (build-time )?patch|patch #4|the ONE remaining...|4 patches|3 of the 4 patches remain"
+```
+שני hits בלבד נותרו, שניהם תקינים במכוון:
+- `docs/investigations.md:544` — בלוק היסטורי עם "עדכון 2026-07-27" שמצהיר נכון על ההווה.
+- `AGENTS.md:56` — "4 patches that used to exist" (past tense, היסטורי, לא הצהרת-הווה).
+
+### חריגות
+
+- מוצא (א) (§1ג, אתרי-מתכון) קיים גם ב-`docs-repo` (ריפו נפרד) — **לא בהיקף הסלייס
+  הזה** (DoD#9 מתוחם ל-`obsidian-web`). מדווח כאן כדי שמרדכי יפתח קומיט נפרד שם.
+
 ## 2026-07-27 — slice/zero-patches — Commit 2: §3ג — ניקוי תיעוד (רחב מ-grep על השם)
 
 ### מה בוצע?
