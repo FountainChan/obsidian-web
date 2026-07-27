@@ -262,6 +262,13 @@ const MOBILE_SCRIPTS = [
     'buffer':        { Buffer: window.Buffer },
     'process':       window.process,
     'child_process': makeChildProcessStub(),
+    // docs/plans/electron-shim-foundation.md §3.1 — window.electron is set
+    // by shims/electron.js, loaded (index.html) BEFORE this script. Note
+    // this registers unconditionally (no isDesktopApp check — the gate that
+    // matters is the `emulate-mobile` body class the bundle itself checks
+    // before it ever calls window.require('electron'), see brief §3.6),
+    // exactly like every other entry in this map.
+    'electron':      window.electron,
   };
 
   function makeChildProcessStub() {
@@ -363,7 +370,13 @@ const MOBILE_SCRIPTS = [
 
   window.process = window.process || {
     platform: 'linux', arch: 'x64',
-    versions: { node: '0.0.0' }, env: {},
+    // electron: '30.0.0' — docs/plans/electron-shim-foundation.md §3.0: a
+    // WEIGHT-BEARING literal, not a "for example" placeholder. Derived
+    // (Tn/Pn/Ln) values must satisfy THREE measured constraints at once —
+    // major>=13, string>="28.2.3", major<40 — or the bundle throws an
+    // "upgrade your installer" error at boot, or picks the wrong clipboard
+    // API branch. '30.0.0' is the smallest version that clears all three.
+    versions: { node: '0.0.0', electron: '30.0.0' }, env: {},
     cwd: function(){ return '/'; },
     nextTick: function(fn){ return Promise.resolve().then(fn); },
   };

@@ -142,6 +142,16 @@
        index.html only supports classic scripts here (brief §3.7#9). -->
   <script src="/client-mobile/platform-bridge.js?v=1"></script>
 
+  <!-- 3f. Electron shim (docs/plans/electron-shim-foundation.md §3.1,
+       docs/plans/desktop-layout-now.md §1-§5) — window.electron +
+       require('electron') (registered by boot.js's modules map, right
+       below). MUST load before boot.js: boot.js reads window.electron
+       synchronously when building its modules map. Reads
+       window.__owObsidianVersion lazily (only inside its sendSync/getVersion
+       handlers, never at module-eval time) — obsidian-version.js above
+       already ran by the time either is ever called. -->
+  <script src="/client-mobile/shims/electron.js?v=1"></script>
+
   <!-- 4. Boot: vault selection, window.require, desktop cleanup.
        Obsidian's scripts (i18next, enhance, i18n, app.js) are injected
        DYNAMICALLY by boot.js after vault verification — same mechanism as

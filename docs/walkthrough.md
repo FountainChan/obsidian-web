@@ -2,6 +2,60 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 2: shims/electron.js (seed + §5א/§5ב) + boot.js רישום
+
+### מה בוצע?
+
+- **`src/client-mobile/shims/electron.js`** (חדש, 510→~530 שורות) — seeded מ-
+  `archive/desktop-runtime:src/client/shims/electron.js`, עם השינויים המחייבים
+  (electron-shim-foundation.md §3.1): הסרת **כל** מופעי `__owSyncJson` (טבלת-ערוצים
+  מקומית עם תשובה קנויה במקום XHR לשרת שלא קיים) · `remote.safeStorage` (4 מתודות) ·
+  export כפול (`window.electron` **וגם** `global.__owElectron`, אותו אובייקט) ·
+  `getCurrentWebContents().session.availableSpellCheckerLanguages` · הסרת ה-short-circuit
+  של `__owBootstrapCache.electron` · `nativeImage` + `clipboard.writeImage` (לא מגודר-דגל,
+  Web Viewer "העתק תמונה").
+- **§5א** — `sendSync('frame')` מחזיר **תמיד** `'native'`, ללא תלות בכתיבה דרך Settings
+  (דריסה מפורשת ומתועדת של `electron-shim-foundation.md` §3.2, שקבע `'hidden'`).
+- **§5ב** — `makeWindow()` נשאר Proxy יחיד (מותר ע"י foundation) אך עם טבלה מורחבת:
+  המתודות שנמדדו דרך alias (`isMinimized`/`restore`/`isMaximized`/`unmaximize`/`minimize`/
+  `setAlwaysOnTop`) מקבלות מימוש **stateful** אמיתי (לא סתם no-op), כדי שהגייט הכפול-קליק
+  (`isMaximized()` אחרי `maximize()`) יתנהג בעקביות.
+- **§5ג** — `remote.systemPreferences` (2 צרכנים: double-click-titlebar guard +
+  `AudioRecorder.getMediaAccessStatus`), `remote.app.relaunch`/`quit` (quit עושה
+  `location.reload()`; relaunch no-op — שני הכפתורים תמיד קוראים לשניהם ברצף).
+- **§5ד** — `Menu.buildFromTemplate(...).popup()` נופל חזרה למיקום-עכבר אחרון
+  (`lastPointer`, נעקב ב-`mousedown`/`contextmenu` capture) כש-`opts.x`/`opts.y` חסרים —
+  שני אתרי-הקריאה בבאנדל מעבירים רק `{window}`.
+- **`file-url` → `'file:///'`** — ערוץ top-level שרץ בכל עלייה (נשמט מהטיוטה הראשונה,
+  נתפס בבדיקת ה-grep מול הבאנדל האמיתי; ראה "חריגות" למטה).
+- **`vault-open`/`vault-remove`/`vault-move`** — לא מומשו (מוקצים ל-Commit 4 / נמחקו כקוד-מת
+  לפי המדידה שאין קריאות בבאנדל).
+- **`src/client-mobile/boot.js`** — `modules['electron'] = window.electron` (רישום
+  ללא-תנאי, כמו כל שאר המפה) · `process.versions.electron = '30.0.0'` (ליטרל נושא-משקל —
+  שלושה אילוצים בו-זמנית: `major>=13`, `>= '28.2.3'`, `major<40`).
+- **`src/client-mobile/index.html`** — תג script חדש ל-`shims/electron.js?v=1`, אחרי
+  `platform-bridge.js` ולפני `boot.js`.
+
+### בדיקות
+
+- `node --check` על `shims/electron.js` ו-`boot.js` — עבר.
+- `bun test` תחת `src/client-mobile` — 76 pass / 0 fail (baseline; טסטים ייעודיים ל-electron.js
+  לא נדרשים ב-DoD של הבריף — האימות האמיתי הוא בדפדפן, Commit 6).
+- לא בוצעה עדיין בדיקת-דפדפן חיה (מתוכננת ל-Commit 6, per §6 בבריף — "אימות מלא בדפדפן").
+
+### חריגות
+
+- טיוטה ראשונית של הקובץ פספסה את ערוץ `file-url` (מטופל ב-§3.0 של
+  electron-shim-foundation.md, לא בטבלת §3.2) — אותר ותוקן **לפני** ה-commit, ע"י גריפ ישיר
+  מול `vendor/obsidian-mobile/app.js` (לא מתוך זיכרון של טבלת הבריף). בלעדיו
+  `resourcePathPrefix` היה נשאר `''` (ברירת-המחדל הריקה), לא `'file:///'` — DoD#3 היה נכשל.
+- **החלטה מתועדת**: `makeWindow()` נשאר Proxy (לפי היתר foundation "בדיוק אחד מותר"),
+  לא הומר לאובייקט רגיל — למרות שדיווח-ה-dispatch הזהיר מ"Proxy גורף = truthy". הפתרון
+  שיושם: לא שינוי המנגנון (Proxy), אלא הרחבת הטבלה המפורשת + תיקון root-cause האמיתי
+  (`remote.systemPreferences` חסר לגמרי) — כי "isMaximizable" כבר היה בטבלה עם ערך נכון
+  (`true`), לא ברירת-מחדל שגויה של ה-Proxy. מתועד גם בקוד עצמו (הערה מעל
+  `windowMethodReturns`).
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 1: מקור-אמת לגרסת Obsidian
 
 ### מה בוצע?
