@@ -2,6 +2,37 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 7: הסרת חטיפת-הקליק על vault-switcher
+
+### מה בוצע?
+
+- **`src/client-mobile/boot.js`** — הוסר בלוק ה-`document.addEventListener('click', ...,
+  true)` שתפס קליק על `.workspace-drawer-vault-switcher` וחסם את ה-handler הנייטיב
+  (עגן: "── Vault switcher click → openVaultChooser ──"). ה-handler הנייטיב עכשיו
+  **פונקציונלי** (Commit 6 אימת: `vault`/`vault-list`/`vault-open` עובדים).
+- **⚠️ שלוש שורות "נשארות"**, כנדרש בבריף (§6 Commit 7): דריסת `app.vault.getName` ·
+  `refreshVaultProfileLabel` + הקריאה לה · ה-`<select>` "נהל כספות" (עגן:
+  `o.value === 'manage-vaults'`, פקד-מובייל, לא קשור). **אף אחת מהשלוש לא נגעה.**
+- עדכון הערה סמוכה (ליד `refreshVaultProfileLabel`) שהתייחסה ל-listener שהוסר —
+  נכתבה מחדש כדי לא להטעות (ההזהרה מפני דריסת textContent על ה-switcher עצמו
+  נשארת נכונה, רק ה"listener" שהיא מגנה עליו השתנה מהמיירט שהוסר לנתיב הנייטיב).
+
+### בדיקות
+
+- `node --check` על `boot.js` — עבר.
+- `bun test` תחת `src/client-mobile` — 86 pass / 0 fail (ללא רגרסיה).
+- **בדיקת-דפדפן חיה (DoD#5, שהיה חסום עד לקומיט הזה)**: קליק על
+  `.workspace-drawer-vault-switcher` פותח **תפריט-DOM נייטיב** (לא שלנו — `class="menu"`
+  הרגילה של Obsidian, `menu-grabber`/`menu-scroll`/`menu-group`) עם "Demo" **וסימן ✓**
+  (`mod-checked`) על הכספת הנוכחית, ו-"Manage vaults..." שמנווט ל-`/starter` בקליק
+  אמיתי. ✅ **בדיוק לפי DoD#5.**
+- **רגרסיה במובייל**: `isMobile===true`, `<select>` הפוליפיל עדיין קיים ותקין, אפס
+  שגיאות-קונסולה חדשות.
+
+### חריגות
+
+- אין.
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 6: אימות מלא בדפדפן
 
 **סביבה**: Node runtime-server מקומי (`http://127.0.0.1:3577`, secure-context —

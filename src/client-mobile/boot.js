@@ -539,9 +539,13 @@ const MOBILE_SCRIPTS = [
   // בערך באותו טיימינג שבו window.app הופך זמין, לפני שה-poll שלנו מתפענח).
   // לכן תמיד קובעים textContent ישירות בנוסף ל-override. finding אביגיל 3
   // (קריטי): הטרגט הוא ה-**child** `.workspace-drawer-vault-name` — לא
-  // `.workspace-drawer-vault-switcher` עצמו (זה ה-click-target של
-  // vault-switcher-fix, boot.js:699 למטה; דריסת textContent עליו תמחק ילדים
-  // ותשבור את ה-listener). idempotent — בטוח לקרוא שוב (reload/late-render).
+  // `.workspace-drawer-vault-switcher` עצמו — **לא** ה-click-target שלנו יותר
+  // (docs/plans/desktop-layout-now.md §6 Commit 7: חטיפת-הקליק שהייתה כאן
+  // הוסרה — הקליק על הפאנל עכשיו מגיע לנתיב הנייטיב, שהוא real עכשיו בזכות
+  // ערוצי vault/vault-list/vault-open ב-shims/electron.js). דריסת textContent
+  // על ה-switcher עצמו עדיין הייתה מוחקת ילדים ושוברת את ה-listener הנייטיב —
+  // הזהירות נשארת נכונה, רק המקור שהיא מגינה עליו השתנה.
+  // idempotent — בטוח לקרוא שוב (reload/late-render).
   // אם הפאנל עדיין לא רונדר כש-owWhenAppReady מתפענח — MutationObserver
   // קצר-מועד (עקבי עם removeLoadingOverlayWhen למעלה), מתנתק אחרי match/timeout.
   function refreshVaultProfileLabel(name) {
@@ -1299,28 +1303,6 @@ const MOBILE_SCRIPTS = [
           app.workspace.on('active-leaf-change', syncUrlFromActiveFile);
         });
       });
-
-      // ── Vault switcher click → openVaultChooser ──────────────────────────
-      // ה-mobile bundle מציג את ה-vault profile panel רק כש-Platform.isDesktopApp
-      // הוא true. ב-patch-obsidian-mobile.js שינינו את התנאי הזה ל-!isMobile כדי
-      // שהפאנל יופיע גם במצב desktop-layout — זהו ה-patch היחיד שנותר על app.js
-      // (vault-profile-on-desktop-layout; שאר התנהגות-הפלטפורמה עברה ל-runtime
-      // interception ב-platform-bridge.js, ראה docs/plans/runtime-platform-descriptors.md
-      // §1). אבל ה-click handler המקורי בתוך
-      // הפאנל קורא ל-`electron.ipcRenderer.sendSync("vault" | "vault-list" |
-      // "vault-open")` — שלא קיים ב-mobile runtime (אין shim ל-window.electron
-      // ב-client-mobile/). תופסים את הקליק בשלב ה-capture, חוסמים את ה-handler
-      // המקורי, ומנווטים ישירות דרך openVaultChooser() (במקום /starter — פוסט
-      // mobile-native-polish /starter→302→/ עם mobile-selected-vault עדיין מוגדר
-      // גורם ל-resume במקום chooser, ראה docs/plans/vault-switcher-fix.md §3א).
-      document.addEventListener('click', function (e) {
-        var target = e.target && e.target.closest && e.target.closest('.workspace-drawer-vault-switcher');
-        if (!target) return;
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        if (window.app && typeof window.app.openVaultChooser === 'function') window.app.openVaultChooser();
-        else location.href = '/starter';   // fallback
-      }, true);
 
       // ── "נהל כספות" <select> → openVaultChooser (polyfill) ────────────────
       // ה-<select> "נהל כספות" (vault-switcher, תחתית-שמאל) מקבל אופציה אחת
