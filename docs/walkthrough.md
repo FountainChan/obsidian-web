@@ -60,6 +60,42 @@
 
 - אין. תיקון ממוקד, בדיוק לפי §10א בבריף.
 
+## 2026-07-27 — slice/desktop-layout-now — סבב-תיקון §10ב: מדידה+תיעוד DoD#15 (calev NO-GO ממצא #2)
+
+### מה בוצע?
+
+- **`docs/investigations.md`** — שלושה ערכים חדשים תחת "בעיות פתוחות" (B-006/B-007/B-008),
+  לפי §10ב בבריף ("שלושת הנושאים, ל-`docs/investigations.md`"):
+  1. **B-006 — שער `isDesktopOnly` נפתח**: פלאגין `isDesktopOnly:true` עובר מ"סירוב מנומק +
+     תווית Unsupported" ל"נטען, ואז נופל מאוחר יותר על API לא-ממומש (`require('fs')===undefined`)".
+  2. **B-007 — `<webview>` בקנבס/Web Viewer**: `document.createElement('webview')` הוא
+     `HTMLUnknownElement` בדפדפן (אין `isLoading`/`loadURL`/`getWebContentsId`) — אך הפלאגין
+     הפנימי `webviewer` כבוי כברירת-מחדל, ולכן הנתיב השבור לא נגיש היום.
+  3. **B-008 — מפתחות `sec:`**: אין רגרסיה — טאב "Keychain" קיים גם ב-base (`717d193`),
+     18 טאבי-הגדרות זהים בין base לסלייס.
+
+### מדידה עצמאית (לא הועתק מדוח כלב)
+
+- **B-006**: grep ישיר על `vendor/obsidian-mobile/app.js` — שני אתרי-הקריאה
+  (`!bn.isDesktopApp&&u.isDesktopOnly` / `!bn.isDesktopApp&&n.isDesktopOnly`) + אימות-חי:
+  שתלתי פלאגין `isDesktopOnly:true`, `enablePlugin()` החזיר `true`, `require('fs')` בתוכו
+  `undefined`.
+- **B-007**: אימות-חי — `document.createElement('webview').constructor.name ===
+  'HTMLUnknownElement'`, `.isLoading`/`.loadURL` שניהם `undefined`; `app.internalPlugins
+  .plugins.webviewer.enabled === false`.
+- **B-008**: הרצתי שרת נפרד על ה-**base** (`worktrees/runtime-platform-descriptors`,
+  commit `717d193`, port 3594) והשוויתי את רשימת טאבי ה-Settings מול הסלייס (port 3593) —
+  18/18 זהים בייט-בבייט (לא הסתמכתי על ההשוואה שכלב כבר עשה).
+
+### בדיקות
+
+- `bun test` תחת `src/client-mobile` — 86 pass / 0 fail (ללא שינוי — commit תיעוד בלבד).
+
+### חריגות
+
+- אין. §10ב מפורש: "למדוד ולתעד — לא לחסום. אין כאן שינוי התנהגות" — שלושתם תועדו כפתוחים,
+  לא תוקנו.
+
 ## 2026-07-27 — slice/desktop-layout-now — סיכום סלייס
 
 **8 commits** (`slice/runtime-platform-descriptors..HEAD`), כל אחד לפי §6 בבריף בדיוק.

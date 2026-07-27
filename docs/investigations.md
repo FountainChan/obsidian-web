@@ -375,6 +375,89 @@ GET 400 /api/fs/readdir?path=.obsidian%2Fappearance.json
 
 ---
 
+### B-006: הדלקת `isDesktopApp` פותחת את שער `isDesktopOnly` — פלאגין desktop-only נטען ואז נופל בשקט
+
+**סטטוס:** נמדד ותועד (`docs/plans/desktop-layout-now.md` §10ב/DoD#15 — "מדידה ותיעוד בלבד,
+לא לחסום"). **לא תוקן, במכוון** — מחוץ ל-scope של הסלייס שהדליק את הדגל.
+
+#### מה נמדד
+
+שני אתרי-הקריאה היחידים ב-`vendor/obsidian-mobile/app.js` שבודקים `isDesktopOnly`:
+
+```js
+(S=!bn.isDesktopApp&&u.isDesktopOnly)&&f.createDiv({cls:"mod-warning",text:F1.labelUnsupported()})
+// ...
+if(!bn.isDesktopApp&&n.isDesktopOnly)return[2,!1];
+```
+
+לפני `desktop-layout-now`, `bn.isDesktopApp` היה `false` קבוע ⇒ `!bn.isDesktopApp` תמיד
+`true` ⇒ השער תמיד נסגר — כל פלאגין (community/system) עם `manifest.isDesktopOnly:true`
+היה מסורב טעינה + מקבל תווית "Unsupported" בחנות. **עכשיו, בפריסת-דסקטופ,
+`bn.isDesktopApp===true` ⇒ `!bn.isDesktopApp===false` ⇒ שני האתרים "עוברים" — כל
+פלאגין desktop-only **נטען בהצלחה**.
+
+אומת חי (Chromium/Playwright, `/vault/0000demo0000demo`, layout=desktop): שתלתי פלאגין
+עם `isDesktopOnly:true` בכספת — `enablePlugin()` החזיר `true` והפלאגין הופיע ב-
+`app.plugins.plugins`. בתוך אותו פלאגין `require('fs')` עדיין מחזיר `undefined`
+(כצפוי — הריצה עדיין דפדפן, לא Node/Electron אמיתי).
+
+#### ההשלכה (לא תוקנה)
+
+זה **שינוי-התנהגות אמיתי מול המשתמש**, לא רק פנימי: פלאגין desktop-only עובר מ"סירוב
+מנומק בזמן טעינה + תווית *Unsupported* בחנות" ל"נטען בהצלחה, ואז נופל מאוחר יותר ברגע
+שהוא באמת נוגע ב-API של Node/Electron שלא ממומש (למשל `require('fs')===undefined`)".
+משתמש שמתקין פלאגין desktop-only יראה כישלון מאוחר ופחות ברור, במקום סירוב מיידי וברור.
+
+#### למה לא תוקן כאן
+
+מחוץ ל-scope של `desktop-layout-now` (§2 "בחוץ" בבריף: "שער `isDesktopOnly`" מפורש
+כ"מדידה בלבד"). אין החלטה עדיין על מדיניות (לחסום את השער ידנית? להראות אזהרה ברורה
+יותר? לתעד את הפלאגינים הידועים שנשברים?) — משאיר פתוח למרדכי/לסלייס הבא.
+
+---
+
+### B-007: `<webview>` בקנבס/Web Viewer — `HTMLUnknownElement` בדפדפן, לא נגיש כברירת-מחדל
+
+**סטטוס:** נמדד ותועד (DoD#15). **לא שבור בפועל היום** — הפלאגין שמשתמש בזה כבוי כברירת-מחדל.
+
+#### מה נמדד
+
+הבאנדל עושה `doc.createElement("webview")` בשני מקומות (Web Viewer core plugin, גם
+בתוך קנבס) ואז קורא למתודות כמו `.isLoading()`/`.loadURL()`/`.getWebContentsId()` —
+אלה קיימות רק על התג `<webview>` האמיתי של Electron (Chromium embedder API), לא בדפדפן
+רגיל. אומת ישירות:
+
+```js
+document.createElement('webview').constructor.name   // "HTMLUnknownElement"
+document.createElement('webview').isLoading           // undefined
+document.createElement('webview').loadURL             // undefined
+```
+
+⇒ אם קוד היה נוגע ב-`webview.isLoading()` היה זורק `TypeError: … is not a function`.
+
+**אבל**: הפלאגין הפנימי `webviewer` (Web Viewer) **קיים** ברשימת ה-31 core plugins
+(`app.internalPlugins.plugins.webviewer` קיים) **אך `enabled===false` כברירת-מחדל** —
+לא נבדק שינוי לעומת base (לא רלוונטי, ברירת-המחדל של הפלאגין עצמו לא קשורה ל-
+`isDesktopApp`). ⇒ הנתיב השבור **לא נגיש** למשתמש שלא מפעיל את הפלאגין ידנית.
+
+#### ההשלכה (פתוחה)
+
+אם משתמש יפעיל את Web Viewer ידנית (Settings → Core plugins), הוא ייתקל ב-TypeError
+בפעם הראשונה שהפלאגין ינסה לטעון URL בתוך `<webview>`. לא נמדד/תועד מעבר לזה — אין
+כרגע shim ל-`<webview>` (מחוץ ל-scope, `docs/plans/desktop-layout-now.md` §2).
+
+---
+
+### B-008: `sec:` keys (SecureStorage) — לא הושפעו מהסלייס, קיימים גם ב-base
+
+**סטטוס:** נמדד, **אין רגרסיה**. הטאב "Keychain" קיים ב-Settings **גם ב-`717d193`**
+(הבסיס, לפני `desktop-layout-now`) — הושוו 18 הטאבים בין base לסלייס, **זהים לחלוטין**
+(אומת עצמאית, לא רק סמכתי על דוח האימות). ⇒ הדלקת `isDesktopApp` לא פתחה/סגרה שום
+דבר בנתיב הזה. ראה גם רשומת SecureStorage הקיימת למעלה (`get`/`set`/`remove`/
+`isKeyExists`/`getPlatformSupportLevel` על `localStorage` עם prefix `sec:`, לא מוצפן).
+
+---
+
 ### B-005: vault switcher / starter לא עובד
 
 **סטטוס:** תוקן ל-MVP ב-2026-05-06. הסטארטר עובד עם prompt להזנת נתיב שרת.
