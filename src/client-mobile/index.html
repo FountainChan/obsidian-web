@@ -67,6 +67,12 @@
   <script src="/client-mobile/storage/opfs-store.js?v=1"></script>
   <script src="/client-mobile/storage/folder-handle-store.js?v=1"></script>
 
+  <!-- 0d. Pure vault-root-path detection (docs/plans/electron-shim-foundation.md
+       §3.3) — consumed by capacitor-shim.js's Filesystem.readFile to answer
+       EISDIR instead of a raw fetch-404/ENOENT when the desktop-only
+       Vault.readRaw("") empty-vault probe reads the vault root as a file. -->
+  <script src="/client-mobile/vault-root-path.js?v=1"></script>
+
   <!-- 0b. Pull-sync engine (the pull-sync brief §2) — v1 =
        OPFS-local vaults only. Must load before boot.js so
        window.__owSync* are ready when boot.js mounts the "Sync now" button

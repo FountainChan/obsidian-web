@@ -2,6 +2,36 @@
 
 > יומן-ביצוע כרונולוגי (אליעזר). רציונל ארכיטקטוני חי ב-docs/decisions (ריפו brief-driven-slices), לא כאן.
 
+## 2026-07-27 — slice/desktop-layout-now — Commit 3: EISDIR בשורש-הכספת + api.vaultPath + בדיקות-יחידה
+
+### מה בוצע?
+
+- **`src/client-mobile/vault-root-path.js`** (חדש) — `isVaultRootPath(p)`, לוגיקה טהורה
+  (בלי DOM), דפוס dual-export זהה ל-`bootstrap-lookup.js`. מנרמל trailing slashes ובודק
+  `''`/`'.'` אחרי נירמול — **לא** `path === ''` בלבד (electron-shim-foundation.md §3.3:
+  הנתיב שנמדד בפועל הוא `"<id>//"`, לא `""`).
+- **`src/client-mobile/shims/capacitor-shim.js`** — ה-`Filesystem` Proxy (get trap) עוטף
+  את `readFile` ספציפית: אם `fullPath(opts)` הוא שורש-הכספת → `Promise.reject(EISDIR)`
+  במקום להמשיך ל-backend (server/local/folder — התיקון מגן על שלושתם דרך נקודת-ההשתלה
+  היחידה). שאר המתודות (כולל ה-`bind`) לא נגעו.
+- **`src/client-mobile/local-vault-registry.js`** — `api.vaultPath(id, name)` →
+  `'/ow/' + id + '/' + (name || id)`. חתימת שני-ארגומנטים במכוון (§3.4: `get(id)` לא מחזיר
+  `id`, כך ש-`vaultPath(get(id))` היה נותן `/ow/undefined/<name>`).
+- **`src/client-mobile/index.html`** — תג script חדש ל-`vault-root-path.js?v=1`, אחרי
+  `local-vault-registry.js`/`opfs-store.js`/`folder-handle-store.js` ולפני `capacitor-shim.js`.
+- **בדיקות-יחידה חדשות**: `test/vault-root-path.test.js` (שורש: `''`/`'/'`/`'.'`/`'//'`/`'///'`
+  → root; `'Welcome.md'`/`'Features/Backlinks.md'`/`'.obsidian/...'`/`'Features/'` → **לא**
+  root) · תוספת ל-`test/local-vault-registry.test.js` עבור `vaultPath` (כולל fallback ל-id).
+
+### בדיקות
+
+- `bun test` תחת `src/client-mobile` — **84 pass / 0 fail** (עלה מ-76 — 8 טסטים חדשים).
+- `node --check` על כל הקבצים שנגעו בהם — עבר.
+
+### חריגות
+
+- אין.
+
 ## 2026-07-27 — slice/desktop-layout-now — Commit 2: shims/electron.js (seed + §5א/§5ב) + boot.js רישום
 
 ### מה בוצע?
