@@ -9,9 +9,10 @@ workers_dev = true
 # Worker only serves the static asset bundle. See index.js for the follow-up
 # (porting the proxy + system-plugin-seed routes to the Worker).
 
-# Uncomment and set your own domain:
+# Custom domain binding — wrangler auto-manages the DNS record + SSL cert.
+# 比 routes + 手动配 DNS 更省事，且证书自动签发。
 routes = [
-  { pattern = "note.vastnext.com/*", zone_name = "vastnext.com" }
+  { pattern = "note.vastnext.com", custom_domain = true }
 ]
 
 # Build output lives outside src/ in the repo's gitignored .tmp/ tree.
